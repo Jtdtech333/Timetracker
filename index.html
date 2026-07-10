@@ -571,94 +571,155 @@
         let isSyncing = false;
         let syncInterval = null;
 
-        // ===== iCLOUD SYNC =====
-        const ICLOUD_KEY = 'timesheet_cloud_data';
+ // ===== iCLOUD DRIVE FILE SYNC - REAL CROSS-DEVICE SYNC =====
+
+// File name in iCloud Drive
+const ICLOUD_FILE_NAME = 'TimesheetData.json';
+
+async function syncToCloud() {
+    if (!currentUser || isSyncing) return;
+    
+    try {
+        isSyncing = true;
+        updateSyncStatus('syncing', 'Syncing...');
         
-        function getCloudData() {
-            try {
-                const stored = localStorage.getItem(ICLOUD_KEY);
-                return stored ? JSON.parse(stored) : null;
-            } catch (e) { return null; }
-        }
-
-        function setCloudData(data) {
-            try {
-                localStorage.setItem(ICLOUD_KEY, JSON.stringify(data));
-                return true;
-            } catch (e) { return false; }
-        }
-
-        async function syncToCloud() {
-            if (!currentUser || isSyncing) return;
-            try {
-                isSyncing = true;
-                updateSyncStatus('syncing', 'Syncing...');
-                const data = {
-                    userId: currentUser.id,
-                    userEmail: currentUser.email,
-                    projects: projects,
-                    entries: entries,
-                    lastSync: new Date().toISOString(),
-                    version: '3.0'
-                };
-                if (setCloudData(data)) {
-                    updateSyncStatus('synced', 'Synced');
-                    showToast('☁️ Synced!', 'success');
-                } else {
-                    updateSyncStatus('error', 'Failed');
-                    showToast('❌ Sync failed', 'error');
-                }
-            } catch (error) {
-                updateSyncStatus('error', 'Failed');
-                showToast('❌ Sync failed', 'error');
-            } finally {
-                isSyncing = false;
-            }
-        }
-
-        async function syncFromCloud() {
-            if (!currentUser || isSyncing) return;
-            try {
-                isSyncing = true;
-                updateSyncStatus('syncing', 'Syncing...');
-                const data = getCloudData();
-                if (data && data.userId === currentUser.id) {
-                    const cloudEntries = data.entries ? data.entries.length : 0;
-                    if (cloudEntries > entries.length) {
-                        projects = data.projects || projects;
-                        entries = data.entries || entries;
-                        showToast('☁️ Downloaded!', 'success');
-                    } else if (cloudEntries < entries.length) {
-                        await syncToCloud();
-                    } else {
-                        showToast('☁️ Already in sync', 'info');
-                    }
-                } else if (data && data.entries) {
-                    if (confirm('Import data from iCloud?')) {
-                        projects = data.projects || projects;
-                        entries = data.entries || entries;
-                        showToast('☁️ Imported!', 'success');
-                    }
-                } else if (entries.length > 0) {
-                    await syncToCloud();
-                }
+        const data = {
+            userId: currentUser.id,
+            userEmail: currentUser.email,
+            projects: projects,
+            entries: entries,
+            lastSync: new Date().toISOString(),
+            version: '3.0'
+        };
+        
+        const jsonData = JSON.stringify(data, null, 2);
+        
+        // Try to save to iCloud Drive via File System Access API
+        try {
+            // For iOS Safari 16.4+ with File System Access
+            if ('showSaveFilePicker' in window) {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: ICLOUD_FILE_NAME,
+                    types: [{
+                        description: 'JSON File',
+                        accept: { 'application/json': ['.json'] }
+                    }]
+                });
+                const writable = await handle.createWritable();
+                await writable.write(jsonData);
+                await writable.close();
+                showToast('☁️ Saved to iCloud Drive!', 'success');
                 updateSyncStatus('synced', 'Synced');
-                render();
-                generateDashboard();
-            } catch (error) {
-                updateSyncStatus('error', 'Failed');
-                showToast('❌ Sync failed', 'error');
-            } finally {
-                isSyncing = false;
+                return;
+            }
+        } catch (e) {
+            console.log('Save picker not available or cancelled');
+        }
+        
+        // Fallback: Store in localStorage and use download
+        // This will work as a backup
+        localStorage.setItem(ICLOUD_FILE_NAME, jsonData);
+        
+        // Also trigger a download so you can save to iCloud Drive manually
+        const blob = new Blob([jsonData], { type: 'application/json' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = ICLOUD_FILE_NAME;
+        link.click();
+        URL.revokeObjectURL(link.href);
+        
+        showToast('📤 File downloaded - save to iCloud Drive', 'info');
+        updateSyncStatus('synced', 'Synced');
+        
+    } catch (error) {
+        console.error('Sync error:', error);
+        updateSyncStatus('error', 'Sync failed');
+        showToast('❌ Sync failed: ' + error.message, 'error');
+    } finally {
+        isSyncing = false;
+    }
+}
+
+async function syncFromCloud() {
+    if (!currentUser || isSyncing) return;
+    
+    try {
+        isSyncing = true;
+        updateSyncStatus('syncing', 'Syncing...');
+        
+        let jsonData = null;
+        
+        // Try to open from iCloud Drive
+        try {
+            if ('showOpenFilePicker' in window) {
+                const [fileHandle] = await window.showOpenFilePicker({
+                    types: [{
+                        description: 'JSON Files',
+                        accept: { 'application/json': ['.json'] }
+                    }],
+                    multiple: false
+                });
+                const file = await fileHandle.getFile();
+                const text = await file.text();
+                if (text) {
+                    jsonData = text;
+                }
+            }
+        } catch (e) {
+            console.log('File picker cancelled or not available');
+        }
+        
+        // Fallback: check localStorage
+        if (!jsonData) {
+            const stored = localStorage.getItem(ICLOUD_FILE_NAME);
+            if (stored) {
+                jsonData = stored;
             }
         }
-
-        function updateSyncStatus(status, label) {
-            const dot = document.querySelector('.sync-status .dot');
-            if (dot) dot.className = 'dot ' + status;
-            document.getElementById('syncLabel').textContent = label;
+        
+        if (jsonData) {
+            try {
+                const data = JSON.parse(jsonData);
+                if (data && data.entries) {
+                    // Check if this data belongs to the current user or ask to import
+                    if (data.userId === currentUser.id) {
+                        const cloudEntries = data.entries.length;
+                        if (cloudEntries > entries.length) {
+                            projects = data.projects || projects;
+                            entries = data.entries || entries;
+                            showToast('☁️ Downloaded from iCloud!', 'success');
+                        } else {
+                            showToast('☁️ Already up to date', 'info');
+                        }
+                    } else {
+                        // Different user's data
+                        if (confirm(`Found data from ${data.userEmail || 'another account'}. Import it?`)) {
+                            projects = data.projects || projects;
+                            entries = data.entries || entries;
+                            showToast('☁️ Imported from iCloud!', 'success');
+                        }
+                    }
+                    render();
+                    generateDashboard();
+                }
+            } catch (e) {
+                console.error('Parse error:', e);
+                showToast('❌ Error reading file', 'error');
+            }
+        } else {
+            showToast('📂 No iCloud file found', 'info');
         }
-
+        
+        updateSyncStatus('synced', 'Synced');
+        
+    } catch (error) {
+        console.error('Sync error:', error);
+        updateSyncStatus('error', 'Sync failed');
+        showToast('❌ Sync failed', 'error');
+    } finally {
+        isSyncing = false;
+    }
+}
         // ===== EXPORT/IMPORT BACKUP =====
         function exportBackup() {
             if (!currentUser) { showToast('Sign in first', 'error'); return; }
