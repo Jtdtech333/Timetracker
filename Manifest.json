@@ -1,13 +1,12 @@
 {
   "name": "Timesheet Pro",
   "short_name": "Timesheet",
-  "description": "Track time, attach files, export PDFs",
+  "description": "Track time across devices",
   "start_url": ".",
   "display": "standalone",
   "background_color": "#f0f4f8",
   "theme_color": "#4299e1",
   "orientation": "portrait",
-  "categories": ["productivity", "business"],
   "icons": [
     {
       "src": "icon-192.png",
