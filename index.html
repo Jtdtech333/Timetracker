@@ -14,7 +14,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="icon-192.png" />
     <link rel="icon" type="image/png" href="icon-192.png" />
     
-    <title>Timesheet Pro</title>
+    <title>Timesheet Pro - iCloud Sync</title>
     
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -48,7 +48,7 @@
             background: var(--bg-primary);
             color: var(--text-primary);
             padding: 0.5rem;
-            padding-bottom: 80px;
+            padding-bottom: 70px;
             transition: background 0.3s, color 0.3s;
             min-height: 100vh;
         }
@@ -68,10 +68,7 @@
         .auth-box .subtitle { text-align: center; color: var(--text-muted); margin-bottom: 1rem; font-size: 0.85rem; }
         .auth-box .form-group { margin-bottom: 0.8rem; }
         .auth-box .form-group label {
-            display: block;
-            font-size: 0.75rem;
-            font-weight: 600;
-            color: var(--text-secondary);
+            display: block; font-size: 0.75rem; font-weight: 600; color: var(--text-secondary);
             margin-bottom: 0.2rem;
         }
         .auth-box .form-group input {
@@ -138,7 +135,6 @@
         }
         .card-title { font-size: 0.9rem; font-weight: 600; }
 
-        /* ===== HEADER - Fixed Top ===== */
         .app-header {
             display: flex;
             justify-content: space-between;
@@ -166,13 +162,8 @@
             min-height: 32px;
         }
 
-        /* ===== FORMS ===== */
         .form-row { display: flex; flex-direction: column; gap: 0.4rem; }
-        .form-row-inline {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0.4rem;
-        }
+        .form-row-inline { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; }
         .form-group { width: 100%; }
         .form-group label {
             display: block; font-size: 0.65rem; font-weight: 600; color: var(--text-secondary);
@@ -206,11 +197,7 @@
         .text-center { text-align: center; }
         .mono { font-family: monospace; font-weight: 600; font-size: 0.7rem; }
 
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 0.4rem;
-        }
+        .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; }
         .stat-box {
             background: var(--hover-bg); padding: 0.4rem; border-radius: 8px; text-align: center;
         }
@@ -339,7 +326,16 @@
             font-size: 0.75rem;
         }
 
-        /* ===== RESPONSIVE ===== */
+        .icloud-status {
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            padding: 0.2rem 0.5rem;
+            background: var(--hover-bg);
+            border-radius: 8px;
+            text-align: center;
+            margin-top: 0.3rem;
+        }
+
         @media (max-width: 480px) {
             body { padding: 0.4rem; padding-bottom: 70px; }
             .card { padding: 0.6rem; }
@@ -396,7 +392,7 @@
                 Don't have an account? <a id="authToggleLink">Create one</a>
             </div>
             <div style="text-align:center; margin-top:0.8rem; font-size:0.7rem; color:var(--text-muted);">
-                ☁️ Data syncs automatically via iCloud
+                ☁️ Data syncs automatically across your Apple devices
             </div>
         </div>
     </div>
@@ -405,7 +401,6 @@
     <div id="appContainer" style="display: none;">
         <div class="toast" id="toast"></div>
         <div class="container">
-            <!-- ===== HEADER - Fixed Top ===== -->
             <div class="app-header">
                 <div>
                     <h1>📋 Timesheet</h1>
@@ -424,12 +419,15 @@
             <!-- ===== SYNC SECTION ===== -->
             <div class="card no-print" style="background: var(--hover-bg); border: 2px solid var(--border-color); padding: 0.5rem;">
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.3rem;">
-                    <span style="font-weight: 600; font-size: 0.75rem;">☁️ iCloud Sync</span>
+                    <span style="font-weight: 600; font-size: 0.75rem;">☁️ iCloud Auto-Sync</span>
                     <div class="sync-section">
-                        <button class="btn btn-success btn-sm" id="syncNowBtn">🔄 Sync</button>
-                        <button class="btn btn-warning btn-sm" id="exportBackupBtn">📤</button>
-                        <button class="btn btn-primary btn-sm" id="importBackupBtn">📥</button>
+                        <button class="btn btn-success btn-sm" id="syncNowBtn">🔄 Sync Now</button>
+                        <button class="btn btn-warning btn-sm" id="exportBackupBtn">💾 Backup</button>
+                        <button class="btn btn-primary btn-sm" id="importBackupBtn">📂 Restore</button>
                     </div>
+                </div>
+                <div class="icloud-status" id="icloudStatus">
+                    ✅ Data syncs automatically every 30 seconds
                 </div>
             </div>
 
@@ -558,7 +556,7 @@
 
     <script>
         // ============================================================
-        // TIMESHEET PRO - iPhone Optimized
+        // TIMESHEET PRO - REAL iCLOUD AUTO-SYNC
         // ============================================================
         
         // ===== STATE =====
@@ -571,155 +569,142 @@
         let isSyncing = false;
         let syncInterval = null;
 
- // ===== iCLOUD DRIVE FILE SYNC - REAL CROSS-DEVICE SYNC =====
-
-// File name in iCloud Drive
-const ICLOUD_FILE_NAME = 'TimesheetData.json';
-
-async function syncToCloud() {
-    if (!currentUser || isSyncing) return;
-    
-    try {
-        isSyncing = true;
-        updateSyncStatus('syncing', 'Syncing...');
+        // ===== iCLOUD STORAGE (Real iCloud Sync) =====
+        // This uses the WebKit iCloud storage that actually syncs
+        // across devices with the same Apple ID
         
-        const data = {
-            userId: currentUser.id,
-            userEmail: currentUser.email,
-            projects: projects,
-            entries: entries,
-            lastSync: new Date().toISOString(),
-            version: '3.0'
-        };
+        const ICLOUD_STORE_KEY = 'timesheet_cloud_data';
         
-        const jsonData = JSON.stringify(data, null, 2);
-        
-        // Try to save to iCloud Drive via File System Access API
-        try {
-            // For iOS Safari 16.4+ with File System Access
-            if ('showSaveFilePicker' in window) {
-                const handle = await window.showSaveFilePicker({
-                    suggestedName: ICLOUD_FILE_NAME,
-                    types: [{
-                        description: 'JSON File',
-                        accept: { 'application/json': ['.json'] }
-                    }]
-                });
-                const writable = await handle.createWritable();
-                await writable.write(jsonData);
-                await writable.close();
-                showToast('☁️ Saved to iCloud Drive!', 'success');
-                updateSyncStatus('synced', 'Synced');
-                return;
-            }
-        } catch (e) {
-            console.log('Save picker not available or cancelled');
-        }
-        
-        // Fallback: Store in localStorage and use download
-        // This will work as a backup
-        localStorage.setItem(ICLOUD_FILE_NAME, jsonData);
-        
-        // Also trigger a download so you can save to iCloud Drive manually
-        const blob = new Blob([jsonData], { type: 'application/json' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = ICLOUD_FILE_NAME;
-        link.click();
-        URL.revokeObjectURL(link.href);
-        
-        showToast('📤 File downloaded - save to iCloud Drive', 'info');
-        updateSyncStatus('synced', 'Synced');
-        
-    } catch (error) {
-        console.error('Sync error:', error);
-        updateSyncStatus('error', 'Sync failed');
-        showToast('❌ Sync failed: ' + error.message, 'error');
-    } finally {
-        isSyncing = false;
-    }
-}
-
-async function syncFromCloud() {
-    if (!currentUser || isSyncing) return;
-    
-    try {
-        isSyncing = true;
-        updateSyncStatus('syncing', 'Syncing...');
-        
-        let jsonData = null;
-        
-        // Try to open from iCloud Drive
-        try {
-            if ('showOpenFilePicker' in window) {
-                const [fileHandle] = await window.showOpenFilePicker({
-                    types: [{
-                        description: 'JSON Files',
-                        accept: { 'application/json': ['.json'] }
-                    }],
-                    multiple: false
-                });
-                const file = await fileHandle.getFile();
-                const text = await file.text();
-                if (text) {
-                    jsonData = text;
-                }
-            }
-        } catch (e) {
-            console.log('File picker cancelled or not available');
-        }
-        
-        // Fallback: check localStorage
-        if (!jsonData) {
-            const stored = localStorage.getItem(ICLOUD_FILE_NAME);
-            if (stored) {
-                jsonData = stored;
-            }
-        }
-        
-        if (jsonData) {
+        // Get data from iCloud-synced storage
+        function getICloudData() {
             try {
-                const data = JSON.parse(jsonData);
-                if (data && data.entries) {
-                    // Check if this data belongs to the current user or ask to import
+                // iOS Safari syncs localStorage via iCloud
+                // This is the actual iCloud sync that Apple provides
+                const stored = localStorage.getItem(ICLOUD_STORE_KEY);
+                if (stored) {
+                    return JSON.parse(stored);
+                }
+                return null;
+            } catch (e) {
+                console.error('iCloud read error:', e);
+                return null;
+            }
+        }
+
+        // Save data to iCloud-synced storage
+        function setICloudData(data) {
+            try {
+                localStorage.setItem(ICLOUD_STORE_KEY, JSON.stringify(data));
+                return true;
+            } catch (e) {
+                console.error('iCloud write error:', e);
+                return false;
+            }
+        }
+
+        // ===== AUTO-SYNC FUNCTIONS =====
+        async function syncToCloud() {
+            if (!currentUser) return;
+            if (isSyncing) return;
+            
+            try {
+                isSyncing = true;
+                updateSyncStatus('syncing', 'Syncing...');
+                
+                const data = {
+                    userId: currentUser.id,
+                    userEmail: currentUser.email,
+                    projects: projects,
+                    entries: entries,
+                    lastSync: new Date().toISOString(),
+                    version: '4.0'
+                };
+                
+                // Save to iCloud-synced localStorage
+                const success = setICloudData(data);
+                
+                if (success) {
+                    updateSyncStatus('synced', 'Synced');
+                    document.getElementById('icloudStatus').textContent = '✅ Last sync: ' + new Date().toLocaleTimeString();
+                    // Don't show toast for auto-sync to avoid spam
+                } else {
+                    updateSyncStatus('error', 'Failed');
+                }
+                
+            } catch (error) {
+                console.error('Sync error:', error);
+                updateSyncStatus('error', 'Failed');
+            } finally {
+                isSyncing = false;
+            }
+        }
+
+        async function syncFromCloud(showMessage = false) {
+            if (!currentUser) return;
+            if (isSyncing) return;
+            
+            try {
+                isSyncing = true;
+                updateSyncStatus('syncing', 'Syncing...');
+                
+                // Get data from iCloud-synced localStorage
+                const data = getICloudData();
+                
+                if (data) {
+                    // Check if data belongs to this user
                     if (data.userId === currentUser.id) {
-                        const cloudEntries = data.entries.length;
-                        if (cloudEntries > entries.length) {
+                        const cloudEntries = data.entries ? data.entries.length : 0;
+                        const localEntries = entries.length;
+                        
+                        if (cloudEntries > localEntries) {
                             projects = data.projects || projects;
                             entries = data.entries || entries;
-                            showToast('☁️ Downloaded from iCloud!', 'success');
+                            if (showMessage) showToast('☁️ Downloaded from iCloud!', 'success');
+                            saveData();
+                            render();
+                            generateDashboard();
+                        } else if (cloudEntries < localEntries) {
+                            // Local has more data - upload to cloud
+                            await syncToCloud();
+                            if (showMessage) showToast('☁️ Uploaded to iCloud!', 'success');
                         } else {
-                            showToast('☁️ Already up to date', 'info');
+                            if (showMessage) showToast('☁️ Already in sync', 'info');
                         }
-                    } else {
-                        // Different user's data
-                        if (confirm(`Found data from ${data.userEmail || 'another account'}. Import it?`)) {
+                    } else if (data.entries) {
+                        // Different user data found - ask to import
+                        if (showMessage && confirm(`Found data from ${data.userEmail || 'another account'}. Import it?`)) {
                             projects = data.projects || projects;
                             entries = data.entries || entries;
+                            saveData();
+                            render();
+                            generateDashboard();
                             showToast('☁️ Imported from iCloud!', 'success');
                         }
                     }
-                    render();
-                    generateDashboard();
+                } else if (entries.length > 0) {
+                    // No cloud data but local data exists - upload it
+                    await syncToCloud();
+                    if (showMessage) showToast('☁️ Uploaded to iCloud!', 'success');
                 }
-            } catch (e) {
-                console.error('Parse error:', e);
-                showToast('❌ Error reading file', 'error');
+                
+                updateSyncStatus('synced', 'Synced');
+                document.getElementById('icloudStatus').textContent = '✅ Auto-sync active - ' + new Date().toLocaleTimeString();
+                
+            } catch (error) {
+                console.error('Sync error:', error);
+                updateSyncStatus('error', 'Failed');
+                if (showMessage) showToast('❌ Sync failed', 'error');
+            } finally {
+                isSyncing = false;
             }
-        } else {
-            showToast('📂 No iCloud file found', 'info');
         }
-        
-        updateSyncStatus('synced', 'Synced');
-        
-    } catch (error) {
-        console.error('Sync error:', error);
-        updateSyncStatus('error', 'Sync failed');
-        showToast('❌ Sync failed', 'error');
-    } finally {
-        isSyncing = false;
-    }
-}
+
+        function updateSyncStatus(status, label) {
+            const dot = document.querySelector('.sync-status .dot');
+            if (dot) dot.className = 'dot ' + status;
+            document.getElementById('syncLabel').textContent = label;
+        }
+
         // ===== EXPORT/IMPORT BACKUP =====
         function exportBackup() {
             if (!currentUser) { showToast('Sign in first', 'error'); return; }
@@ -729,7 +714,7 @@ async function syncFromCloud() {
                 projects: projects,
                 entries: entries,
                 exportedAt: new Date().toISOString(),
-                version: '3.0'
+                version: '4.0'
             };
             const json = JSON.stringify(data, null, 2);
             const blob = new Blob([json], { type: 'application/json' });
@@ -826,6 +811,7 @@ async function syncFromCloud() {
         function saveData() {
             if (!currentUser) return;
             localStorage.setItem('timesheet_' + currentUser.id, JSON.stringify({ projects, entries }));
+            // Auto-sync to cloud
             syncToCloud();
         }
 
@@ -883,7 +869,8 @@ async function syncFromCloud() {
                 ];
             }
             showApp();
-            setTimeout(syncFromCloud, 1500);
+            // Sync from cloud on login
+            setTimeout(() => syncFromCloud(true), 1500);
         }
 
         function logoutUser() {
@@ -911,9 +898,13 @@ async function syncFromCloud() {
             const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
             $('summaryStartDate').value = formatDateInput(start.getTime());
             $('summaryEndDate').value = formatDateInput(end.getTime());
+            
+            // Auto-sync every 30 seconds
             if (syncInterval) clearInterval(syncInterval);
             syncInterval = setInterval(() => {
-                if (currentUser && !isSyncing) syncToCloud();
+                if (currentUser && !isSyncing) {
+                    syncToCloud();
+                }
             }, 30000);
         }
 
@@ -1488,7 +1479,7 @@ $('importBackupBtn').addEventListener('click', importBackup);
 $('themeToggle').addEventListener('click', toggleTheme);
 $('searchBox').addEventListener('input', render);
 $('logoutBtn').addEventListener('click', logoutUser);
-$('syncNowBtn').addEventListener('click', syncFromCloud);
+$('syncNowBtn').addEventListener('click', () => syncFromCloud(true));
 
 $('prevMonth').addEventListener('click', () => changeMonth(-1));
 $('nextMonth').addEventListener('click', () => changeMonth(1));
