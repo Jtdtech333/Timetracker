@@ -7,8 +7,14 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Timesheet" />
     <meta name="theme-color" content="#4299e1" />
+    
+    <!-- PWA Manifest -->
     <link rel="manifest" href="manifest.json" />
     <link rel="apple-touch-icon" href="icon-192.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="icon-192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="icon-192.png" />
+    <link rel="icon" type="image/png" href="icon-192.png" />
+    
     <title>Timesheet Pro</title>
     
     <style>
@@ -81,10 +87,26 @@
         .auth-box .auth-switch { text-align: center; margin-top: 1rem; color: var(--text-muted); font-size: 0.9rem; }
         .auth-box .auth-switch a { color: var(--primary); cursor: pointer; text-decoration: none; font-weight: 600; }
         .auth-box .auth-error {
-            background: #fed7d7; color: #c53030; padding: 0.5rem 1rem; border-radius: 8px;
-            margin-bottom: 1rem; display: none; font-size: 0.9rem;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            display: none;
+            font-size: 0.9rem;
         }
-        [data-theme="dark"] .auth-box .auth-error { background: #742a2a; color: #feb2b2; }
+        .auth-box .auth-error.error {
+            background: #fed7d7;
+            color: #c53030;
+            display: block;
+        }
+        .auth-box .auth-error.success {
+            background: #48bb78;
+            color: white;
+            display: block;
+        }
+        [data-theme="dark"] .auth-box .auth-error.error {
+            background: #742a2a;
+            color: #feb2b2;
+        }
 
         .btn {
             padding: 0.7rem 1.2rem; border: none; border-radius: 10px; font-weight: 600;
@@ -252,7 +274,7 @@
                 Don't have an account? <a id="authToggleLink">Create one</a>
             </div>
             <div style="text-align:center; margin-top:1rem; font-size:0.8rem; color:var(--text-muted);">
-                ☁️ Data syncs automatically via Supabase
+                ☁️ Data syncs automatically
             </div>
         </div>
     </div>
@@ -401,13 +423,7 @@
 
     <script>
         // ============================================================
-        // SUPABASE CONFIG - REPLACE WITH YOUR CREDENTIALS!
-        // ============================================================
-        const SUPABASE_URL = 'https://awrvkasglchiaxkhnbsw.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF3cnZrYXNnbGNoaWF4a2huYnN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2MzM3NjksImV4cCI6MjA5OTIwOTc2OX0.bvUKnzMlW_REuEbkz5ZSvScUZuEHQZH1-8HLIqQIZ3k';
-        
-        // ============================================================
-        // MAIN APP - Simple Version
+        // MAIN APP - Complete Working Version
         // ============================================================
         
         // ===== STATE =====
@@ -472,7 +488,6 @@
         function saveData() {
             if (!currentUser) return;
             localStorage.setItem('timesheet_' + currentUser.id, JSON.stringify({ projects, entries }));
-            showToast('💾 Saved locally', 'info');
         }
 
         function loadData() {
@@ -551,7 +566,6 @@
             $('userGreeting').textContent = 'Welcome, ' + (currentUser ? currentUser.name : 'User');
             render();
             generateDashboard();
-            // Set default date
             const today = new Date();
             $('entryDate').value = formatDateInput(today.getTime());
             const start = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -777,7 +791,6 @@
                 return;
             }
             let html = '<div style="display:grid; grid-template-columns:1fr; gap:0.75rem;">';
-            // Group by day or week
             const groups = {};
             for (const e of filtered) {
                 const key = type === 'daily' 
@@ -1038,53 +1051,52 @@ function toggleAuthMode() {
 isSignUp = !isSignUp;
 $('authBtn').textContent = isSignUp ? 'Sign Up' : 'Sign In';
 $('authToggleLink').textContent = isSignUp ? 'Sign in' : 'Create one';
+$('authError').className = 'auth-error';
 $('authError').style.display = 'none';
 }
 
 // ===== AUTH HANDLER =====
 function handleAuth(e) {
-    e.preventDefault();
-    const email = $('authEmail').value.trim();
-    const password = $('authPassword').value.trim();
-    
-    if (!email || !password) {
-        $('authError').textContent = 'Please fill in all fields';
-        $('authError').style.display = 'block';
-        return;
-    }
-    
-    if (isSignUp) {
-        const user = createUser(email, password);
-        if (!user) {
-            $('authError').textContent = 'Email already registered';
-            $('authError').style.display = 'block';
-            return;
-        }
-        // Show success message
-        $('authError').textContent = '✅ Account created successfully! Please sign in.';
-        $('authError').style.display = 'block';
-        $('authError').style.background = '#48bb78';
-        $('authError').style.color = 'white';
-        
-        // Switch to sign in mode
-        setTimeout(() => {
-            $('authError').style.display = 'none';
-            $('authError').style.background = '';
-            $('authError').style.color = '';
-            toggleAuthMode();
-            $('authEmail').value = email;
-            $('authPassword').value = '';
-        }, 2000);
-        
-    } else {
-        const user = authenticate(email, password);
-        if (!user) {
-            $('authError').textContent = 'Invalid email or password';
-            $('authError').style.display = 'block';
-            return;
-        }
-        loginUser(user);
-    }
+e.preventDefault();
+const email = $('authEmail').value.trim();
+const password = $('authPassword').value.trim();
+
+if (!email || !password) {
+$('authError').textContent = 'Please fill in all fields';
+$('authError').className = 'auth-error error';
+return;
+}
+
+if (isSignUp) {
+const user = createUser(email, password);
+if (!user) {
+$('authError').textContent = '❌ Email already registered';
+$('authError').className = 'auth-error error';
+return;
+}
+// Show success message
+$('authError').textContent = '✅ Account created! Please sign in.';
+$('authError').className = 'auth-error success';
+
+// Switch to sign in mode after 2 seconds
+setTimeout(() => {
+$('authError').style.display = 'none';
+$('authError').className = 'auth-error';
+toggleAuthMode();
+$('authEmail').value = email;
+$('authPassword').value = '';
+showToast('✅ Account created! Please sign in.', 'success');
+}, 2000);
+
+} else {
+const user = authenticate(email, password);
+if (!user) {
+$('authError').textContent = '❌ Invalid email or password';
+$('authError').className = 'auth-error error';
+return;
+}
+loginUser(user);
+}
 }
 
 // ===== TABS =====
@@ -1167,10 +1179,8 @@ if (e.ctrlKey && e.key === 'Enter') addEntry();
 
 window.addEventListener('beforeunload', saveData);
 
-// Auto-generate summary
 setTimeout(generateSummary, 500);
 
-// Show welcome
 if (currentUser) {
 showToast('👋 Welcome ' + currentUser.name + '!', 'info');
 }
