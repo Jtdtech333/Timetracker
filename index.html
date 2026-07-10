@@ -1043,35 +1043,48 @@ $('authError').style.display = 'none';
 
 // ===== AUTH HANDLER =====
 function handleAuth(e) {
-e.preventDefault();
-const email = $('authEmail').value.trim();
-const password = $('authPassword').value.trim();
-if (!email || !password) {
-$('authError').textContent = 'Please fill in all fields';
-$('authError').style.display = 'block';
-return;
-}
-if (isSignUp) {
-const user = createUser(email, password);
-if (!user) {
-$('authError').textContent = 'Email already registered';
-$('authError').style.display = 'block';
-return;
-}
-showToast('✅ Account created! Please sign in.', 'success');
-toggleAuthMode();
-$('authEmail').value = email;
-$('authPassword').value = '';
-$('authError').style.display = 'none';
-} else {
-const user = authenticate(email, password);
-if (!user) {
-$('authError').textContent = 'Invalid email or password';
-$('authError').style.display = 'block';
-return;
-}
-loginUser(user);
-}
+    e.preventDefault();
+    const email = $('authEmail').value.trim();
+    const password = $('authPassword').value.trim();
+    
+    if (!email || !password) {
+        $('authError').textContent = 'Please fill in all fields';
+        $('authError').style.display = 'block';
+        return;
+    }
+    
+    if (isSignUp) {
+        const user = createUser(email, password);
+        if (!user) {
+            $('authError').textContent = 'Email already registered';
+            $('authError').style.display = 'block';
+            return;
+        }
+        // Show success message
+        $('authError').textContent = '✅ Account created successfully! Please sign in.';
+        $('authError').style.display = 'block';
+        $('authError').style.background = '#48bb78';
+        $('authError').style.color = 'white';
+        
+        // Switch to sign in mode
+        setTimeout(() => {
+            $('authError').style.display = 'none';
+            $('authError').style.background = '';
+            $('authError').style.color = '';
+            toggleAuthMode();
+            $('authEmail').value = email;
+            $('authPassword').value = '';
+        }, 2000);
+        
+    } else {
+        const user = authenticate(email, password);
+        if (!user) {
+            $('authError').textContent = 'Invalid email or password';
+            $('authError').style.display = 'block';
+            return;
+        }
+        loginUser(user);
+    }
 }
 
 // ===== TABS =====
