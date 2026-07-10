@@ -14,7 +14,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="icon-192.png" />
     <link rel="icon" type="image/png" href="icon-192.png" />
     
-    <title>Timesheet Pro - Cloud Sync</title>
+    <title>Timesheet Pro</title>
     
     <!-- ===== SUPABASE SDK ===== -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2">
@@ -373,8 +373,8 @@
             <div class="auth-error" id="authError"></div>
             <form id="authForm">
                 <div class="form-group">
-                    <label>👤 Email</label>
-                    <input type="email" id="authEmail" placeholder="your@email.com" required />
+                    <label>👤 Username</label>
+                    <input type="text" id="authUsername" placeholder="Enter username" required />
                 </div>
                 <div class="form-group">
                     <label>🔑 Password</label>
@@ -418,7 +418,7 @@
                         <button class="btn btn-success btn-sm" id="syncNowBtn">🔄 Sync Now</button>
                     </div>
                 </div>
-                <div class="icloud-status" style="font-size: 0.65rem; color: var(--text-muted); padding: 0.2rem 0.5rem; background: var(--hover-bg); border-radius: 8px; text-align: center; margin-top: 0.3rem;">
+                <div style="font-size: 0.65rem; color: var(--text-muted); padding: 0.2rem 0.5rem; background: var(--hover-bg); border-radius: 8px; text-align: center; margin-top: 0.3rem;">
                     ✅ Data syncs automatically to the cloud
                 </div>
             </div>
@@ -550,11 +550,12 @@
         // ============================================================
         // SUPABASE CONFIG - REPLACE WITH YOUR CREDENTIALS!
         // ============================================================
-        const SUPABASE_URL = 'https://awrvkasglchiaxkhnbsw.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF3cnZrYXNnbGNoaWF4a2huYnN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2MzM3NjksImV4cCI6MjA5OTIwOTc2OX0.bvUKnzMlW_REuEbkz5ZSvScUZuEHQZH1-8HLIqQIZ3k';
+        const SUPABASE_URL = 'YOUR_SUPABASE_URL';
+        const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
         
         // ============================================================
-        // TIMESHEET PRO - REAL CLOUD SYNC WITH SUPABASE        // ============================================================
+        // TIMESHEET PRO - SIMPLIFIED CLOUD SYNC
+        // ============================================================
         
         // ===== STATE =====
         let currentUser = null;
@@ -564,7 +565,7 @@
         let editingId = null;
         let isSignUp = false;
         let isSyncing = false;
-        let supabase = null;
+        let supabaseClient = null;
 
         // ===== DOM REFS =====
         const $ = id => document.getElementById(id);
@@ -616,118 +617,78 @@
         function escapeHtml(t) { if (!t) return ''; const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
 
         // ============================================================
-        // SUPABASE FUNCTIONS
+        // SUPABASE FUNCTIONS - SIMPLIFIED
         // ============================================================
         
         function initSupabase() {
             const { createClient } = supabase;
-            return createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
         }
 
-        async function syncToSupabase() {
+        async function loadFromCloud() {
             if (!currentUser) return;
-            if (isSyncing) return;
             
             try {
-                isSyncing = true;
-                updateSyncStatus('syncing', 'Syncing...');
+                updateSyncStatus('syncing', 'Loading...');
                 
-                // Save projects
-                for (const p of projects) {
-                    const { error } = await supabase
-                        .from('projects')
-                        .upsert({
-                            id: p.id,
-                            user_id: currentUser.id,
-                            name: p.name,
-                            rate: p.rate || 0,
-                            updated_at: new Date().toISOString()
-                        });
-                    if (error) console.error('Project sync error:', error);
-                }
-                
-                // Save entries
-                for (const e of entries) {
-                    const { error } = await supabase
-                        .from('entries')
-                        .upsert({
-                            id: e.id,
-                            user_id: currentUser.id,
-                            project_id: e.projectId,
-                            start_time: new Date(e.start).toISOString(),
-                            end_time: new Date(e.end).toISOString(),
-                            description: e.description || '',
-                            files: e.files || [],
-                            updated_at: new Date().toISOString()
-                        });
-                    if (error) console.error('Entry sync error:', error);
-                }
-                
-                updateSyncStatus('synced', 'Synced');
-                showToast('☁️ Synced to cloud!', 'success');
-                
-            } catch (error) {
-                console.error('Sync error:', error);
-                updateSyncStatus('error', 'Sync failed');
-                showToast('❌ Sync failed: ' + error.message, 'error');
-            } finally {
-                isSyncing = false;
-            }
-        }
-
-        async function syncFromSupabase() {
-            if (!currentUser) return;
-            if (isSyncing) return;
-            
-            try {
-                isSyncing = true;
-                updateSyncStatus('syncing', 'Syncing...');
-                
-                // Fetch projects
-                const { data: projectsData, error: projectsError } = await supabase
-                    .from('projects')
+                // Load projects
+                const { data: projectsData, error: projectsError } = await supabaseClient
+                    .from('timesheet_data')
                     .select('*')
                     .eq('user_id', currentUser.id);
                 
                 if (projectsError) throw projectsError;
                 
-                // Fetch entries
-                const { data: entriesData, error: entriesError } = await supabase
-                    .from('entries')
-                    .select('*')
-                    .eq('user_id', currentUser.id)
-                    .order('start_time', { ascending: false });
-                
-                if (entriesError) throw entriesError;
-                
                 if (projectsData && projectsData.length > 0) {
-                    projects = projectsData.map(p => ({
-                        id: p.id,
-                        name: p.name,
-                        rate: p.rate || 0
-                    }));
-                }
-                
-                if (entriesData && entriesData.length > 0) {
-                    entries = entriesData.map(e => ({
-                        id: e.id,
-                        projectId: e.project_id,
-                        start: new Date(e.start_time).getTime(),
-                        end: new Date(e.end_time).getTime(),
-                        description: e.description || '',
-                        files: e.files || []
-                    }));
+                    // Parse the data
+                    const data = projectsData[0];
+                    projects = data.projects || [];
+                    entries = data.entries || [];
+                    
+                    // Update the UI
+                    render();
+                    generateDashboard();
+                    showToast('☁️ Data loaded from cloud!', 'success');
                 }
                 
                 updateSyncStatus('synced', 'Synced');
-                render();
-                generateDashboard();
-                showToast('☁️ Downloaded from cloud!', 'success');
                 
             } catch (error) {
-                console.error('Sync error:', error);
-                updateSyncStatus('error', 'Sync failed');
-                showToast('❌ Sync failed: ' + error.message, 'error');
+                console.error('Load error:', error);
+                updateSyncStatus('error', 'Failed');
+                showToast('❌ Failed to load data', 'error');
+            }
+        }
+
+        async function saveToCloud() {
+            if (!currentUser) return;
+            if (isSyncing) return;
+            
+            try {
+                isSyncing = true;
+                updateSyncStatus('syncing', 'Saving...');
+                
+                const data = {
+                    user_id: currentUser.id,
+                    projects: projects,
+                    entries: entries,
+                    updated_at: new Date().toISOString()
+                };
+                
+                // Upsert (update or insert)
+                const { error } = await supabaseClient
+                    .from('timesheet_data')
+                    .upsert(data, { onConflict: 'user_id' });
+                
+                if (error) throw error;
+                
+                updateSyncStatus('synced', 'Synced');
+                showToast('☁️ Saved to cloud!', 'success');
+                
+            } catch (error) {
+                console.error('Save error:', error);
+                updateSyncStatus('error', 'Failed');
+                showToast('❌ Failed to save: ' + error.message, 'error');
             } finally {
                 isSyncing = false;
             }
@@ -740,48 +701,51 @@
         }
 
         // ============================================================
-        // AUTH
+        // AUTH (Simple - No Supabase Auth)
         // ============================================================
         
-        async function signUp(email, password) {
-            try {
-                const { data, error } = await supabase.auth.signUp({
-                    email: email,
-                    password: password
-                });
-                if (error) throw error;
-                return data;
-            } catch (error) {
-                console.error('Sign up error:', error);
-                throw error;
-            }
+        function loadUsers() {
+            const stored = localStorage.getItem('timesheet_users');
+            try { return stored ? JSON.parse(stored) : []; } catch (e) { return []; }
+        }
+        
+        function saveUsers(users) {
+            localStorage.setItem('timesheet_users', JSON.stringify(users));
+        }
+        
+        function authenticate(username, password) {
+            const users = loadUsers();
+            return users.find(u => u.username === username && u.password === password);
+        }
+        
+        function createUser(username, password) {
+            const users = loadUsers();
+            if (users.find(u => u.username === username)) return null;
+            const user = {
+                id: 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+                username: username,
+                password: password,
+                created: new Date().toISOString()
+            };
+            users.push(user);
+            saveUsers(users);
+            return user;
         }
 
-        async function signIn(email, password) {
-            try {
-                const { data, error } = await supabase.auth.signInWithPassword({
-                    email: email,
-                    password: password
-                });
-                if (error) throw error;
-                return data;
-            } catch (error) {
-                console.error('Sign in error:', error);
-                throw error;
-            }
+        async function loginUser(user) {
+            currentUser = user;
+            localStorage.setItem('currentUser', JSON.stringify(user));
+            
+            // Load from cloud
+            await loadFromCloud();
+            
+            showApp();
         }
 
-        async function signOut() {
-            try {
-                await supabase.auth.signOut();
-                currentUser = null;
-                projects = [];
-                entries = [];
-                localStorage.removeItem('currentUser');
-                showAuth();
-            } catch (error) {
-                console.error('Sign out error:', error);
-            }
+        function logoutUser() {
+            currentUser = null;
+            localStorage.removeItem('currentUser');
+            showAuth();
         }
 
         // ============================================================
@@ -796,26 +760,22 @@
         function showApp() {
             $('authContainer').style.display = 'none';
             $('appContainer').style.display = 'block';
-            $('userGreeting').textContent = 'Welcome, ' + (currentUser ? currentUser.email : 'User');
-            render();
-            generateDashboard();
+            $('userGreeting').textContent = 'Welcome, ' + (currentUser ? currentUser.username : 'User');
+            
+            // Load data if we haven't already
+            if (projects.length === 0) {
+                loadFromCloud();
+            } else {
+                render();
+                generateDashboard();
+            }
+            
             const today = new Date();
             $('entryDate').value = formatDateInput(today.getTime());
             const start = new Date(today.getFullYear(), today.getMonth(), 1);
             const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
             $('summaryStartDate').value = formatDateInput(start.getTime());
             $('summaryEndDate').value = formatDateInput(end.getTime());
-            
-            // Auto-sync every 30 seconds
-            if (window._syncInterval) clearInterval(window._syncInterval);
-            window._syncInterval = setInterval(() => {
-                if (currentUser && !isSyncing) {
-                    syncToSupabase();
-                }
-            }, 30000);
-            
-            // Initial sync from cloud
-            setTimeout(() => syncFromSupabase(), 1000);
         }
 
         // ============================================================
@@ -1118,7 +1078,8 @@
                 });
                 showToast('✅ Entry added!', 'success');
             }
-            syncToSupabase();
+            // Auto-save to cloud
+            saveToCloud();
             render();
             clearEntryForm();
         }
@@ -1151,7 +1112,7 @@
         function deleteEntry(id) {
             if (!confirm('Delete this entry?')) return;
             entries = entries.filter(e => e.id !== id);
-            syncToSupabase();
+            saveToCloud();
             render();
             showToast('🗑 Entry deleted', 'info');
         }
@@ -1160,7 +1121,7 @@
             if (!confirm('Delete project and all entries?')) return;
             entries = entries.filter(e => e.projectId !== id);
             projects = projects.filter(p => p.id !== id);
-            syncToSupabase();
+            saveToCloud();
             render();
             showToast('🗑 Project deleted', 'info');
         }
@@ -1171,7 +1132,7 @@
             if (!confirm(`Delete ${todayEntries.length} entries?`)) return;
             const todayStart = new Date().setHours(0, 0, 0, 0);
             entries = entries.filter(e => e.start < todayStart || e.start >= todayStart + 86400000);
-            syncToSupabase();
+            saveToCloud();
             render();
             showToast(`🗑 Deleted ${todayEntries.length} entries`, 'info');
         }
@@ -1181,7 +1142,7 @@
             if (!name) return;
             const rate = parseFloat(prompt('Enter hourly rate ($):', '0')) || 0;
             projects.push({ id: 'p_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4), name, rate });
-            syncToSupabase();
+            saveToCloud();
             render();
             showToast(`✅ Project "${name}" added`, 'success');
         }
@@ -1307,20 +1268,24 @@ $('authError').style.display = 'none';
 }
 
 // ===== AUTH HANDLER =====
-async function handleAuth(e) {
+function handleAuth(e) {
 e.preventDefault();
-const email = $('authEmail').value.trim();
+const username = $('authUsername').value.trim();
 const password = $('authPassword').value.trim();
 
-if (!email || !password) {
+if (!username || !password) {
 $('authError').textContent = 'Please fill in all fields';
 $('authError').className = 'auth-error error';
 return;
 }
 
-try {
 if (isSignUp) {
-const data = await signUp(email, password);
+const user = createUser(username, password);
+if (!user) {
+$('authError').textContent = '❌ Username already exists';
+$('authError').className = 'auth-error error';
+return;
+}
 $('authError').textContent = '✅ Account created! Please sign in.';
 $('authError').className = 'auth-error success';
 
@@ -1328,21 +1293,19 @@ setTimeout(() => {
 $('authError').style.display = 'none';
 $('authError').className = 'auth-error';
 toggleAuthMode();
-$('authEmail').value = email;
+$('authUsername').value = username;
 $('authPassword').value = '';
 showToast('✅ Account created! Please sign in.', 'success');
 }, 2000);
+
 } else {
-const data = await signIn(email, password);
-currentUser = data.user;
-localStorage.setItem('currentUser', JSON.stringify(currentUser));
-showToast('✅ Signed in!', 'success');
-showApp();
-}
-} catch (error) {
-$('authError').textContent = '❌ ' + error.message;
+const user = authenticate(username, password);
+if (!user) {
+$('authError').textContent = '❌ Invalid username or password';
 $('authError').className = 'auth-error error';
-console.error('Auth error:', error);
+return;
+}
+loginUser(user);
 }
 }
 
@@ -1381,10 +1344,10 @@ $('themeToggle').textContent = saved === 'dark' ? '☀️' : '🌓';
 // INIT
 // ============================================================
         
-async function init() {
+function init() {
 loadTheme();
-            
-// Initialize Supabase
+
+// Check if Supabase is configured
 if (SUPABASE_URL === 'YOUR_SUPABASE_URL' || SUPABASE_ANON_KEY === 'YOUR_SUPABASE_ANON_KEY') {
 document.body.innerHTML = `
 <div style="display:flex; justify-content:center; align-items:center; min-height:100vh; padding:2rem; background:var(--bg-primary);">
@@ -1402,22 +1365,16 @@ const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 return;
 }
 
-supabase = initSupabase();
+// Initialize Supabase
+initSupabase();
 
 // Check if user is already logged in
 const stored = localStorage.getItem('currentUser');
 if (stored) {
 try {
 const user = JSON.parse(stored);
-// Verify session
-const { data: { session }, error } = await supabase.auth.getSession();
-if (session) {
 currentUser = user;
 showApp();
-} else {
-localStorage.removeItem('currentUser');
-showAuth();
-}
 } catch (e) {
 showAuth();
 }
@@ -1446,8 +1403,8 @@ $('exportPdfBtn').addEventListener('click', exportPDF);
 $('exportSummaryPdfBtn').addEventListener('click', exportSummaryPDF);
 $('themeToggle').addEventListener('click', toggleTheme);
 $('searchBox').addEventListener('input', render);
-$('logoutBtn').addEventListener('click', signOut);
-$('syncNowBtn').addEventListener('click', syncFromSupabase);
+$('logoutBtn').addEventListener('click', logoutUser);
+$('syncNowBtn').addEventListener('click', loadFromCloud);
 
 $('prevMonth').addEventListener('click', () => changeMonth(-1));
 $('nextMonth').addEventListener('click', () => changeMonth(1));
