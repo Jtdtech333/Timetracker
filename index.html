@@ -375,12 +375,12 @@
     <div id="authContainer" class="auth-container">
         <div class="auth-box">
             <h1>📋 Timesheet Pro</h1>
-            <div class="subtitle">Track time • Auto-sync via iCloud</div>
+            <div class="subtitle">Track time • iCloud Drive Sync</div>
             <div class="auth-error" id="authError"></div>
             <form id="authForm">
                 <div class="form-group">
-                    <label>👤 Email</label>
-                    <input type="email" id="authEmail" placeholder="your@email.com" required />
+                    <label>👤 Username</label>
+                    <input type="text" id="authUsername" placeholder="Enter username" required />
                 </div>
                 <div class="form-group">
                     <label>🔑 Password</label>
@@ -392,7 +392,7 @@
                 Don't have an account? <a id="authToggleLink">Create one</a>
             </div>
             <div style="text-align:center; margin-top:0.8rem; font-size:0.7rem; color:var(--text-muted);">
-                ☁️ Data syncs automatically across your Apple devices
+                ☁️ Data syncs via iCloud Drive
             </div>
         </div>
     </div>
@@ -419,15 +419,14 @@
             <!-- ===== SYNC SECTION ===== -->
             <div class="card no-print" style="background: var(--hover-bg); border: 2px solid var(--border-color); padding: 0.5rem;">
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.3rem;">
-                    <span style="font-weight: 600; font-size: 0.75rem;">☁️ iCloud Auto-Sync</span>
+                    <span style="font-weight: 600; font-size: 0.75rem;">☁️ iCloud Drive Sync</span>
                     <div class="sync-section">
-                        <button class="btn btn-success btn-sm" id="syncNowBtn">🔄 Sync Now</button>
-                        <button class="btn btn-warning btn-sm" id="exportBackupBtn">💾 Backup</button>
-                        <button class="btn btn-primary btn-sm" id="importBackupBtn">📂 Restore</button>
+                        <button class="btn btn-success btn-sm" id="syncUploadBtn">📤 Upload to iCloud</button>
+                        <button class="btn btn-primary btn-sm" id="syncDownloadBtn">📥 Download from iCloud</button>
                     </div>
                 </div>
                 <div class="icloud-status" id="icloudStatus">
-                    ✅ Data syncs automatically every 30 seconds
+                    💡 Tap "Upload" to save your data to iCloud Drive, "Download" to load it on another device.
                 </div>
             </div>
 
@@ -556,7 +555,7 @@
 
     <script>
         // ============================================================
-        // TIMESHEET PRO - REAL iCLOUD AUTO-SYNC
+        // TIMESHEET PRO - iCLOUD DRIVE SYNC
         // ============================================================
         
         // ===== STATE =====
@@ -567,196 +566,9 @@
         let editingId = null;
         let isSignUp = false;
         let isSyncing = false;
-        let syncInterval = null;
 
-        // ===== iCLOUD STORAGE (Real iCloud Sync) =====
-        // This uses the WebKit iCloud storage that actually syncs
-        // across devices with the same Apple ID
-        
-        const ICLOUD_STORE_KEY = 'timesheet_cloud_data';
-        
-        // Get data from iCloud-synced storage
-        function getICloudData() {
-            try {
-                // iOS Safari syncs localStorage via iCloud
-                // This is the actual iCloud sync that Apple provides
-                const stored = localStorage.getItem(ICLOUD_STORE_KEY);
-                if (stored) {
-                    return JSON.parse(stored);
-                }
-                return null;
-            } catch (e) {
-                console.error('iCloud read error:', e);
-                return null;
-            }
-        }
-
-        // Save data to iCloud-synced storage
-        function setICloudData(data) {
-            try {
-                localStorage.setItem(ICLOUD_STORE_KEY, JSON.stringify(data));
-                return true;
-            } catch (e) {
-                console.error('iCloud write error:', e);
-                return false;
-            }
-        }
-
-        // ===== AUTO-SYNC FUNCTIONS =====
-        async function syncToCloud() {
-            if (!currentUser) return;
-            if (isSyncing) return;
-            
-            try {
-                isSyncing = true;
-                updateSyncStatus('syncing', 'Syncing...');
-                
-                const data = {
-                    userId: currentUser.id,
-                    userEmail: currentUser.email,
-                    projects: projects,
-                    entries: entries,
-                    lastSync: new Date().toISOString(),
-                    version: '4.0'
-                };
-                
-                // Save to iCloud-synced localStorage
-                const success = setICloudData(data);
-                
-                if (success) {
-                    updateSyncStatus('synced', 'Synced');
-                    document.getElementById('icloudStatus').textContent = '✅ Last sync: ' + new Date().toLocaleTimeString();
-                    // Don't show toast for auto-sync to avoid spam
-                } else {
-                    updateSyncStatus('error', 'Failed');
-                }
-                
-            } catch (error) {
-                console.error('Sync error:', error);
-                updateSyncStatus('error', 'Failed');
-            } finally {
-                isSyncing = false;
-            }
-        }
-
-        async function syncFromCloud(showMessage = false) {
-            if (!currentUser) return;
-            if (isSyncing) return;
-            
-            try {
-                isSyncing = true;
-                updateSyncStatus('syncing', 'Syncing...');
-                
-                // Get data from iCloud-synced localStorage
-                const data = getICloudData();
-                
-                if (data) {
-                    // Check if data belongs to this user
-                    if (data.userId === currentUser.id) {
-                        const cloudEntries = data.entries ? data.entries.length : 0;
-                        const localEntries = entries.length;
-                        
-                        if (cloudEntries > localEntries) {
-                            projects = data.projects || projects;
-                            entries = data.entries || entries;
-                            if (showMessage) showToast('☁️ Downloaded from iCloud!', 'success');
-                            saveData();
-                            render();
-                            generateDashboard();
-                        } else if (cloudEntries < localEntries) {
-                            // Local has more data - upload to cloud
-                            await syncToCloud();
-                            if (showMessage) showToast('☁️ Uploaded to iCloud!', 'success');
-                        } else {
-                            if (showMessage) showToast('☁️ Already in sync', 'info');
-                        }
-                    } else if (data.entries) {
-                        // Different user data found - ask to import
-                        if (showMessage && confirm(`Found data from ${data.userEmail || 'another account'}. Import it?`)) {
-                            projects = data.projects || projects;
-                            entries = data.entries || entries;
-                            saveData();
-                            render();
-                            generateDashboard();
-                            showToast('☁️ Imported from iCloud!', 'success');
-                        }
-                    }
-                } else if (entries.length > 0) {
-                    // No cloud data but local data exists - upload it
-                    await syncToCloud();
-                    if (showMessage) showToast('☁️ Uploaded to iCloud!', 'success');
-                }
-                
-                updateSyncStatus('synced', 'Synced');
-                document.getElementById('icloudStatus').textContent = '✅ Auto-sync active - ' + new Date().toLocaleTimeString();
-                
-            } catch (error) {
-                console.error('Sync error:', error);
-                updateSyncStatus('error', 'Failed');
-                if (showMessage) showToast('❌ Sync failed', 'error');
-            } finally {
-                isSyncing = false;
-            }
-        }
-
-        function updateSyncStatus(status, label) {
-            const dot = document.querySelector('.sync-status .dot');
-            if (dot) dot.className = 'dot ' + status;
-            document.getElementById('syncLabel').textContent = label;
-        }
-
-        // ===== EXPORT/IMPORT BACKUP =====
-        function exportBackup() {
-            if (!currentUser) { showToast('Sign in first', 'error'); return; }
-            const data = {
-                userId: currentUser.id,
-                userEmail: currentUser.email,
-                projects: projects,
-                entries: entries,
-                exportedAt: new Date().toISOString(),
-                version: '4.0'
-            };
-            const json = JSON.stringify(data, null, 2);
-            const blob = new Blob([json], { type: 'application/json' });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = `timesheet_backup_${new Date().toISOString().slice(0,10)}.json`;
-            link.click();
-            URL.revokeObjectURL(link.href);
-            showToast('📤 Backup exported!', 'success');
-        }
-
-        function importBackup() {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = '.json';
-            input.onchange = function(e) {
-                const file = this.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = function(ev) {
-                    try {
-                        const data = JSON.parse(ev.target.result);
-                        if (!data.projects || !data.entries) {
-                            showToast('❌ Invalid backup', 'error');
-                            return;
-                        }
-                        if (!confirm(`Import ${data.entries.length} entries? This will REPLACE all data.`)) return;
-                        projects = data.projects;
-                        entries = data.entries;
-                        saveData();
-                        render();
-                        generateDashboard();
-                        syncToCloud();
-                        showToast(`✅ Imported ${data.entries.length} entries!`, 'success');
-                    } catch (err) {
-                        showToast('❌ Error reading backup', 'error');
-                    }
-                };
-                reader.readAsText(file);
-            };
-            input.click();
-        }
+        // ===== FILE NAME =====
+        const ICLOUD_FILE_NAME = 'TimesheetData.json';
 
         // ===== DOM REFS =====
         const $ = id => document.getElementById(id);
@@ -807,12 +619,214 @@
         }
         function escapeHtml(t) { if (!t) return ''; const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
 
-        // ===== SAVE / LOAD =====
+        // ============================================================
+        // iCLOUD DRIVE FUNCTIONS
+        // ============================================================
+        
+        function getDataForExport() {
+            return {
+                user: currentUser,
+                projects: projects,
+                entries: entries,
+                exportedAt: new Date().toISOString(),
+                version: '4.0'
+            };
+        }
+
+        async function uploadToICloud() {
+            if (!currentUser) { showToast('Sign in first', 'error'); return; }
+            if (isSyncing) return;
+            
+            try {
+                isSyncing = true;
+                updateSyncStatus('syncing', 'Uploading...');
+                
+                const data = getDataForExport();
+                const jsonData = JSON.stringify(data, null, 2);
+                
+                // Use the File System Access API (works on iOS Safari 16.4+)
+                if ('showSaveFilePicker' in window) {
+                    try {
+                        const handle = await window.showSaveFilePicker({
+                            suggestedName: ICLOUD_FILE_NAME,
+                            types: [{
+                                description: 'JSON File',
+                                accept: { 'application/json': ['.json'] }
+                            }]
+                        });
+                        const writable = await handle.createWritable();
+                        await writable.write(jsonData);
+                        await writable.close();
+                        showToast('☁️ Saved to iCloud Drive!', 'success');
+                        updateSyncStatus('synced', 'Synced');
+                        document.getElementById('icloudStatus').textContent = '✅ Saved to iCloud Drive at ' + new Date().toLocaleTimeString();
+                        isSyncing = false;
+                        return;
+                    } catch (e) {
+                        console.log('Save picker cancelled:', e);
+                    }
+                }
+                
+                // Fallback: Download the file
+                const blob = new Blob([jsonData], { type: 'application/json' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = ICLOUD_FILE_NAME;
+                link.click();
+                URL.revokeObjectURL(link.href);
+                
+                showToast('📤 File downloaded. Save it to iCloud Drive.', 'info');
+                updateSyncStatus('synced', 'Synced');
+                document.getElementById('icloudStatus').textContent = '📤 File downloaded. Save to iCloud Drive.';
+                
+            } catch (error) {
+                console.error('Upload error:', error);
+                updateSyncStatus('error', 'Upload failed');
+                showToast('❌ Upload failed: ' + error.message, 'error');
+            } finally {
+                isSyncing = false;
+            }
+        }
+
+        async function downloadFromICloud() {
+            if (!currentUser) { showToast('Sign in first', 'error'); return; }
+            if (isSyncing) return;
+            
+            try {
+                isSyncing = true;
+                updateSyncStatus('syncing', 'Downloading...');
+                
+                let jsonData = null;
+                
+                // Try File System Access API
+                if ('showOpenFilePicker' in window) {
+                    try {
+                        const [fileHandle] = await window.showOpenFilePicker({
+                            types: [{
+                                description: 'JSON Files',
+                                accept: { 'application/json': ['.json'] }
+                            }],
+                            multiple: false
+                        });
+                        const file = await fileHandle.getFile();
+                        jsonData = await file.text();
+                    } catch (e) {
+                        console.log('File picker cancelled:', e);
+                    }
+                }
+                
+                if (jsonData) {
+                    try {
+                        const data = JSON.parse(jsonData);
+                        if (data && data.entries) {
+                            // Check if this data matches the current user
+                            if (data.user && data.user.id === currentUser.id) {
+                                const cloudEntries = data.entries.length;
+                                const localEntries = entries.length;
+                                
+                                if (cloudEntries > localEntries || cloudEntries < localEntries) {
+                                    projects = data.projects || projects;
+                                    entries = data.entries || entries;
+                                    showToast('☁️ Downloaded from iCloud!', 'success');
+                                } else {
+                                    showToast('☁️ Already up to date', 'info');
+                                }
+                            } else if (data.user) {
+                                // Different user's data - ask to import
+                                if (confirm(`Found data for "${data.user.username}". Import it?`)) {
+                                    projects = data.projects || projects;
+                                    entries = data.entries || entries;
+                                    showToast('☁️ Imported from iCloud!', 'success');
+                                }
+                            } else {
+                                // No user info in file - just import
+                                if (confirm(`Import ${data.entries.length} entries?`)) {
+                                    projects = data.projects || projects;
+                                    entries = data.entries || entries;
+                                    showToast('☁️ Imported from iCloud!', 'success');
+                                }
+                            }
+                            saveData();
+                            render();
+                            generateDashboard();
+                            document.getElementById('icloudStatus').textContent = '✅ Loaded from iCloud Drive at ' + new Date().toLocaleTimeString();
+                        }
+                    } catch (e) {
+                        console.error('Parse error:', e);
+                        showToast('❌ Error reading file', 'error');
+                    }
+                } else {
+                    showToast('📂 No file selected or file empty', 'info');
+                }
+                
+                updateSyncStatus('synced', 'Synced');
+                
+            } catch (error) {
+                console.error('Download error:', error);
+                updateSyncStatus('error', 'Download failed');
+                showToast('❌ Download failed: ' + error.message, 'error');
+            } finally {
+                isSyncing = false;
+            }
+        }
+
+        function updateSyncStatus(status, label) {
+            const dot = document.querySelector('.sync-status .dot');
+            if (dot) dot.className = 'dot ' + status;
+            document.getElementById('syncLabel').textContent = label;
+        }
+
+        // ============================================================
+        // AUTH (Simple - No Supabase)
+        // ============================================================
+        
+        function loadUsers() {
+            const stored = localStorage.getItem('timesheet_users');
+            try { return stored ? JSON.parse(stored) : []; } catch (e) { return []; }
+        }
+        
+        function saveUsers(users) {
+            localStorage.setItem('timesheet_users', JSON.stringify(users));
+        }
+        
+        function authenticate(username, password) {
+            const users = loadUsers();
+            return users.find(u => u.username === username && u.password === password);
+        }
+        
+        function createUser(username, password) {
+            const users = loadUsers();
+            if (users.find(u => u.username === username)) return null;
+            const user = {
+                id: 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+                username: username,
+                password: password,
+                created: new Date().toISOString()
+            };
+            users.push(user);
+            saveUsers(users);
+            return user;
+        }
+
+        function loginUser(user) {
+            currentUser = user;
+            localStorage.setItem('currentUser', JSON.stringify(user));
+            showApp();
+        }
+
+        function logoutUser() {
+            currentUser = null;
+            localStorage.removeItem('currentUser');
+            showAuth();
+        }
+
+        // ============================================================
+        // SAVE / LOAD DATA
+        // ============================================================
+        
         function saveData() {
             if (!currentUser) return;
             localStorage.setItem('timesheet_' + currentUser.id, JSON.stringify({ projects, entries }));
-            // Auto-sync to cloud
-            syncToCloud();
         }
 
         function loadData() {
@@ -833,54 +847,10 @@
             return false;
         }
 
-        // ===== AUTH =====
-        function loadUsers() {
-            const stored = localStorage.getItem('timesheet_users');
-            try { return stored ? JSON.parse(stored) : []; } catch (e) { return []; }
-        }
-        function saveUsers(users) { localStorage.setItem('timesheet_users', JSON.stringify(users)); }
-        function authenticate(email, password) {
-            const users = loadUsers();
-            return users.find(u => u.email === email && u.password === password);
-        }
-        function createUser(email, password) {
-            const users = loadUsers();
-            if (users.find(u => u.email === email)) return null;
-            const user = {
-                id: 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
-                email: email,
-                name: email.split('@')[0],
-                password: password,
-                created: new Date().toISOString()
-            };
-            users.push(user);
-            saveUsers(users);
-            return user;
-        }
-
-        function loginUser(user) {
-            currentUser = user;
-            localStorage.setItem('currentUser', JSON.stringify(user));
-            if (projects.length === 0) {
-                projects = [
-                    { id: 'p1', name: 'Website', rate: 75 },
-                    { id: 'p2', name: 'App Dev', rate: 100 },
-                    { id: 'p3', name: 'Consulting', rate: 150 }
-                ];
-            }
-            showApp();
-            // Sync from cloud on login
-            setTimeout(() => syncFromCloud(true), 1500);
-        }
-
-        function logoutUser() {
-            currentUser = null;
-            localStorage.removeItem('currentUser');
-            if (syncInterval) { clearInterval(syncInterval); syncInterval = null; }
-            showAuth();
-        }
-
-        // ===== UI =====
+        // ============================================================
+        // UI
+        // ============================================================
+        
         function showAuth() {
             $('authContainer').style.display = 'flex';
             $('appContainer').style.display = 'none';
@@ -889,7 +859,7 @@
         function showApp() {
             $('authContainer').style.display = 'none';
             $('appContainer').style.display = 'block';
-            $('userGreeting').textContent = 'Welcome, ' + (currentUser ? currentUser.name : 'User');
+            $('userGreeting').textContent = 'Welcome, ' + (currentUser ? currentUser.username : 'User');
             render();
             generateDashboard();
             const today = new Date();
@@ -898,17 +868,12 @@
             const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
             $('summaryStartDate').value = formatDateInput(start.getTime());
             $('summaryEndDate').value = formatDateInput(end.getTime());
-            
-            // Auto-sync every 30 seconds
-            if (syncInterval) clearInterval(syncInterval);
-            syncInterval = setInterval(() => {
-                if (currentUser && !isSyncing) {
-                    syncToCloud();
-                }
-            }, 30000);
         }
 
-        // ===== POPULATE PROJECT DROPDOWN =====
+        // ============================================================
+        // POPULATE PROJECT DROPDOWN
+        // ============================================================
+        
         function populateProjectDropdown() {
             const select = $('entryProject');
             const currentVal = select.value;
@@ -922,7 +887,10 @@
             if (currentVal && projects.find(p => p.id === currentVal)) select.value = currentVal;
         }
 
-        // ===== RENDER =====
+        // ============================================================
+        // RENDER
+        // ============================================================
+        
         function render() {
             renderProjects();
             populateProjectDropdown();
@@ -1036,7 +1004,10 @@
             $('monthLabel').textContent = currentMonth.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
         }
 
-        // ===== DASHBOARD =====
+        // ============================================================
+        // DASHBOARD
+        // ============================================================
+        
         function generateDashboard() {
             if (entries.length === 0) {
                 $('dashboardContent').innerHTML = `
@@ -1086,7 +1057,10 @@
             $('dashboardContent').innerHTML = html;
         }
 
-        // ===== SUMMARY =====
+        // ============================================================
+        // SUMMARY
+        // ============================================================
+        
         function generateSummary() {
             const type = $('summaryType').value;
             const projectId = $('summaryProject').value;
@@ -1156,7 +1130,10 @@
             return 1 + Math.round(((d - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
         }
 
-        // ===== ACTIONS =====
+        // ============================================================
+        // ACTIONS
+        // ============================================================
+        
         function addEntry() {
             const date = $('entryDate').value;
             const projectId = $('entryProject').value;
@@ -1261,7 +1238,10 @@
             showToast(`✅ Project "${name}" added`, 'success');
         }
 
-        // ===== EXPORTS =====
+        // ============================================================
+        // EXPORTS (CSV/PDF)
+        // ============================================================
+        
         function exportCSV() {
             const monthEntries = getMonthEntries();
             if (monthEntries.length === 0) { showToast('No entries', 'error'); return; }
@@ -1381,19 +1361,19 @@ $('authError').style.display = 'none';
 // ===== AUTH HANDLER =====
 function handleAuth(e) {
 e.preventDefault();
-const email = $('authEmail').value.trim();
+const username = $('authUsername').value.trim();
 const password = $('authPassword').value.trim();
 
-if (!email || !password) {
+if (!username || !password) {
 $('authError').textContent = 'Please fill in all fields';
 $('authError').className = 'auth-error error';
 return;
 }
 
 if (isSignUp) {
-const user = createUser(email, password);
+const user = createUser(username, password);
 if (!user) {
-$('authError').textContent = '❌ Email already registered';
+$('authError').textContent = '❌ Username already exists';
 $('authError').className = 'auth-error error';
 return;
 }
@@ -1404,15 +1384,15 @@ setTimeout(() => {
 $('authError').style.display = 'none';
 $('authError').className = 'auth-error';
 toggleAuthMode();
-$('authEmail').value = email;
+$('authUsername').value = username;
 $('authPassword').value = '';
 showToast('✅ Account created! Please sign in.', 'success');
 }, 2000);
 
 } else {
-const user = authenticate(email, password);
+const user = authenticate(username, password);
 if (!user) {
-$('authError').textContent = '❌ Invalid email or password';
+$('authError').textContent = '❌ Invalid username or password';
 $('authError').className = 'auth-error error';
 return;
 }
@@ -1451,15 +1431,25 @@ $('themeToggle').textContent = saved === 'dark' ? '☀️' : '🌓';
 }
 }
 
-// ===== INIT =====
+// ============================================================
+// INIT
+// ============================================================
+        
 function init() {
 loadTheme();
-if (!loadData()) showAuth();
-else showApp();
 
+// Check if user is already logged in
+if (!loadData()) {
+showAuth();
+} else {
+showApp();
+}
+
+// Auth events
 $('authForm').addEventListener('submit', handleAuth);
 $('authToggleLink').addEventListener('click', toggleAuthMode);
 
+// App events
 $('addEntryBtn').addEventListener('click', addEntry);
 $('entryDate').addEventListener('keydown', (e) => { if (e.key === 'Enter') addEntry(); });
 $('entryStart').addEventListener('keydown', (e) => { if (e.key === 'Enter') addEntry(); });
@@ -1474,12 +1464,11 @@ $('clearDayBtn').addEventListener('click', clearTodayEntries);
 $('exportCsvBtn').addEventListener('click', exportCSV);
 $('exportPdfBtn').addEventListener('click', exportPDF);
 $('exportSummaryPdfBtn').addEventListener('click', exportSummaryPDF);
-$('exportBackupBtn').addEventListener('click', exportBackup);
-$('importBackupBtn').addEventListener('click', importBackup);
 $('themeToggle').addEventListener('click', toggleTheme);
 $('searchBox').addEventListener('input', render);
 $('logoutBtn').addEventListener('click', logoutUser);
-$('syncNowBtn').addEventListener('click', () => syncFromCloud(true));
+$('syncUploadBtn').addEventListener('click', uploadToICloud);
+$('syncDownloadBtn').addEventListener('click', downloadFromICloud);
 
 $('prevMonth').addEventListener('click', () => changeMonth(-1));
 $('nextMonth').addEventListener('click', () => changeMonth(1));
@@ -1502,7 +1491,7 @@ if (currentUser) saveData();
 
 setTimeout(generateSummary, 500);
 
-if (currentUser) showToast('👋 Welcome ' + currentUser.name + '!', 'info');
+if (currentUser) showToast('👋 Welcome ' + currentUser.username + '!', 'info');
 }
 
 document.addEventListener('DOMContentLoaded', init);
