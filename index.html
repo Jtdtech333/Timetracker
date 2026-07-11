@@ -54,7 +54,6 @@
         }
         .container { max-width: 1200px; margin: 0 auto; }
 
-        /* ===== AUTH ===== */
         .auth-container { min-height: 80vh; display: flex; justify-content: center; align-items: center; }
         .auth-box {
             background: var(--bg-card);
@@ -421,12 +420,12 @@
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.3rem;">
                     <span style="font-weight: 600; font-size: 0.75rem;">☁️ iCloud Drive Sync</span>
                     <div class="sync-section">
-                        <button class="btn btn-success btn-sm" id="syncUploadBtn">📤 Upload to iCloud</button>
-                        <button class="btn btn-primary btn-sm" id="syncDownloadBtn">📥 Download from iCloud</button>
+                        <button class="btn btn-success btn-sm" id="syncUploadBtn">📤 Upload</button>
+                        <button class="btn btn-primary btn-sm" id="syncDownloadBtn">📥 Download</button>
                     </div>
                 </div>
                 <div class="icloud-status" id="icloudStatus">
-                    💡 Tap "Upload" to save your data to iCloud Drive, "Download" to load it on another device.
+                    💡 Tap "Upload" to save to iCloud Drive, "Download" to load from iCloud Drive
                 </div>
             </div>
 
@@ -555,7 +554,7 @@
 
     <script>
         // ============================================================
-        // TIMESHEET PRO - iCLOUD DRIVE SYNC
+        // TIMESHEET PRO - iCLOUD DRIVE SYNC (FIXED)
         // ============================================================
         
         // ===== STATE =====
@@ -633,6 +632,7 @@
             };
         }
 
+        // Upload - works on iOS
         async function uploadToICloud() {
             if (!currentUser) { showToast('Sign in first', 'error'); return; }
             if (isSyncing) return;
@@ -664,15 +664,18 @@
                         return;
                     } catch (e) {
                         console.log('Save picker cancelled:', e);
+                        // Fall through to download method
                     }
                 }
                 
-                // Fallback: Download the file
+                // Fallback: Download the file (works on all devices)
                 const blob = new Blob([jsonData], { type: 'application/json' });
                 const link = document.createElement('a');
                 link.href = URL.createObjectURL(blob);
                 link.download = ICLOUD_FILE_NAME;
+                document.body.appendChild(link);
                 link.click();
+                document.body.removeChild(link);
                 URL.revokeObjectURL(link.href);
                 
                 showToast('📤 File downloaded. Save it to iCloud Drive.', 'info');
@@ -688,6 +691,7 @@
             }
         }
 
+        // Download - FIXED for iOS
         async function downloadFromICloud() {
             if (!currentUser) { showToast('Sign in first', 'error'); return; }
             if (isSyncing) return;
@@ -696,67 +700,96 @@
                 isSyncing = true;
                 updateSyncStatus('syncing', 'Downloading...');
                 
-                let jsonData = null;
+                // Create a hidden file input element (this works on iOS)
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.accept = '.json,application/json';
+                fileInput.style.cssText = 'position:absolute;left:-9999px;top:-9999px;';
                 
-                // Try File System Access API
-                if ('showOpenFilePicker' in window) {
-                    try {
-                        const [fileHandle] = await window.showOpenFilePicker({
-                            types: [{
-                                description: 'JSON Files',
-                                accept: { 'application/json': ['.json'] }
-                            }],
-                            multiple: false
-                        });
-                        const file = await fileHandle.getFile();
-                        jsonData = await file.text();
-                    } catch (e) {
-                        console.log('File picker cancelled:', e);
-                    }
+                // Add it to the body
+                document.body.appendChild(fileInput);
+                
+                // Create a promise that resolves when a file is selected
+                const file = await new Promise((resolve) => {
+                    fileInput.onchange = function(e) {
+                        if (this.files && this.files.length > 0) {
+                            resolve(this.files[0]);
+                        } else {
+                            resolve(null);
+                        }
+                        // Clean up
+                        document.body.removeChild(fileInput);
+                    };
+                    // Handle cancel (iOS and desktop)
+                    fileInput.oncancel = function() {
+                        resolve(null);
+                        document.body.removeChild(fileInput);
+                    };
+                    // Also handle blur (some browsers)
+                    window.addEventListener('focus', function onFocus() {
+                        if (!fileInput.files || fileInput.files.length === 0) {
+                            // User might have cancelled
+                        }
+                        window.removeEventListener('focus', onFocus);
+                    }, { once: true });
+                    
+                    // Trigger the file picker
+                    fileInput.click();
+                });
+                
+                if (!file) {
+                    showToast('📂 No file selected', 'info');
+                    updateSyncStatus('synced', 'Synced');
+                    isSyncing = false;
+                    return;
                 }
                 
-                if (jsonData) {
-                    try {
-                        const data = JSON.parse(jsonData);
-                        if (data && data.entries) {
-                            // Check if this data matches the current user
-                            if (data.user && data.user.id === currentUser.id) {
-                                const cloudEntries = data.entries.length;
-                                const localEntries = entries.length;
-                                
-                                if (cloudEntries > localEntries || cloudEntries < localEntries) {
-                                    projects = data.projects || projects;
-                                    entries = data.entries || entries;
-                                    showToast('☁️ Downloaded from iCloud!', 'success');
-                                } else {
-                                    showToast('☁️ Already up to date', 'info');
-                                }
-                            } else if (data.user) {
-                                // Different user's data - ask to import
-                                if (confirm(`Found data for "${data.user.username}". Import it?`)) {
-                                    projects = data.projects || projects;
-                                    entries = data.entries || entries;
-                                    showToast('☁️ Imported from iCloud!', 'success');
-                                }
-                            } else {
-                                // No user info in file - just import
-                                if (confirm(`Import ${data.entries.length} entries?`)) {
-                                    projects = data.projects || projects;
-                                    entries = data.entries || entries;
-                                    showToast('☁️ Imported from iCloud!', 'success');
-                                }
-                            }
-                            saveData();
-                            render();
-                            generateDashboard();
-                            document.getElementById('icloudStatus').textContent = '✅ Loaded from iCloud Drive at ' + new Date().toLocaleTimeString();
+                // Read the file
+                const text = await file.text();
+                const data = JSON.parse(text);
+                
+                if (data && data.entries) {
+                    // Check if this data matches the current user
+                    if (data.user && data.user.id === currentUser.id) {
+                        const cloudEntries = data.entries.length;
+                        const localEntries = entries.length;
+                        
+                        if (cloudEntries > localEntries || cloudEntries < localEntries) {
+                            projects = data.projects || projects;
+                            entries = data.entries || entries;
+                            showToast('☁️ Downloaded from iCloud!', 'success');
+                        } else {
+                            showToast('☁️ Already up to date', 'info');
                         }
-                    } catch (e) {
-                        console.error('Parse error:', e);
-                        showToast('❌ Error reading file', 'error');
+                    } else if (data.user) {
+                        // Different user's data - ask to import
+                        if (confirm(`Found data for "${data.user.username}". Import it?`)) {
+                            projects = data.projects || projects;
+                            entries = data.entries || entries;
+                            showToast('☁️ Imported from iCloud!', 'success');
+                        } else {
+                            showToast('📂 Import cancelled', 'info');
+                            isSyncing = false;
+                            return;
+                        }
+                    } else {
+                        // No user info in file - just import
+                        if (confirm(`Import ${data.entries.length} entries?`)) {
+                            projects = data.projects || projects;
+                            entries = data.entries || entries;
+                            showToast('☁️ Imported from iCloud!', 'success');
+                        } else {
+                            showToast('📂 Import cancelled', 'info');
+                            isSyncing = false;
+                            return;
+                        }
                     }
+                    saveData();
+                    render();
+                    generateDashboard();
+                    document.getElementById('icloudStatus').textContent = '✅ Loaded from iCloud Drive at ' + new Date().toLocaleTimeString();
                 } else {
-                    showToast('📂 No file selected or file empty', 'info');
+                    showToast('❌ Invalid file format', 'error');
                 }
                 
                 updateSyncStatus('synced', 'Synced');
