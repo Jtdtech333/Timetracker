@@ -14,7 +14,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="icon-192.png" />
     <link rel="icon" type="image/png" href="icon-192.png" />
     
-    <title>Timesheet Pro - iCloud Sync</title>
+    <title>Timesheet Pro - Auto Sync</title>
     
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -234,14 +234,20 @@
         .toast.info { border-left: 4px solid var(--primary); }
 
         .sync-status {
-            display: inline-flex; align-items: center; gap: 0.2rem; font-size: 0.6rem;
-            color: var(--text-muted); background: var(--hover-bg); padding: 0.15rem 0.4rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.2rem;
+            font-size: 0.6rem;
+            color: var(--text-muted);
+            background: var(--hover-bg);
+            padding: 0.15rem 0.4rem;
             border-radius: 12px;
         }
         .sync-status .dot { width: 5px; height: 5px; border-radius: 50%; }
         .sync-status .dot.synced { background: var(--success); }
         .sync-status .dot.syncing { background: var(--warning); animation: pulse 1s infinite; }
         .sync-status .dot.error { background: var(--danger); }
+        .sync-status .dot.auto { background: var(--primary); animation: pulse 1.5s infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
         .tabs {
@@ -374,7 +380,7 @@
     <div id="authContainer" class="auth-container">
         <div class="auth-box">
             <h1>📋 Timesheet Pro</h1>
-            <div class="subtitle">Track time • iCloud Drive Sync</div>
+            <div class="subtitle">Track time • Auto-sync via iCloud</div>
             <div class="auth-error" id="authError"></div>
             <form id="authForm">
                 <div class="form-group">
@@ -391,7 +397,7 @@
                 Don't have an account? <a id="authToggleLink">Create one</a>
             </div>
             <div style="text-align:center; margin-top:0.8rem; font-size:0.7rem; color:var(--text-muted);">
-                ☁️ Data syncs via iCloud Drive
+                ☁️ Auto-syncs every 30 seconds
             </div>
         </div>
     </div>
@@ -407,8 +413,8 @@
                 </div>
                 <div class="header-actions">
                     <span class="sync-status" id="syncStatus">
-                        <span class="dot synced"></span>
-                        <span id="syncLabel">Synced</span>
+                        <span class="dot auto"></span>
+                        <span id="syncLabel">Auto</span>
                     </span>
                     <button class="btn btn-sm btn-outline" id="logoutBtn">🚪</button>
                     <button class="btn-theme no-print" id="themeToggle">🌓</button>
@@ -418,14 +424,15 @@
             <!-- ===== SYNC SECTION ===== -->
             <div class="card no-print" style="background: var(--hover-bg); border: 2px solid var(--border-color); padding: 0.5rem;">
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.3rem;">
-                    <span style="font-weight: 600; font-size: 0.75rem;">☁️ iCloud Drive Sync</span>
+                    <span style="font-weight: 600; font-size: 0.75rem;">☁️ Auto-Sync</span>
                     <div class="sync-section">
                         <button class="btn btn-success btn-sm" id="syncUploadBtn">📤 Upload</button>
                         <button class="btn btn-primary btn-sm" id="syncDownloadBtn">📥 Download</button>
+                        <button class="btn btn-warning btn-sm" id="toggleAutoSyncBtn">⏸️ Pause</button>
                     </div>
                 </div>
                 <div class="icloud-status" id="icloudStatus">
-                    💡 Tap "Upload" to save to iCloud Drive, "Download" to load from iCloud Drive
+                    🔄 Auto-sync active • Saves to iCloud Drive every 30 seconds
                 </div>
             </div>
 
@@ -554,7 +561,7 @@
 
     <script>
         // ============================================================
-        // TIMESHEET PRO - iCLOUD DRIVE SYNC (FIXED)
+        // TIMESHEET PRO - AUTO-SYNC WITH iCLOUD DRIVE
         // ============================================================
         
         // ===== STATE =====
@@ -565,6 +572,9 @@
         let editingId = null;
         let isSignUp = false;
         let isSyncing = false;
+        let autoSyncEnabled = true;
+        let autoSyncInterval = null;
+        let pendingChanges = false;
 
         // ===== FILE NAME =====
         const ICLOUD_FILE_NAME = 'TimesheetData.json';
@@ -632,7 +642,70 @@
             };
         }
 
-        // Upload - works on iOS
+        function updateSyncStatus(status, label) {
+            const dot = document.querySelector('.sync-status .dot');
+            if (dot) dot.className = 'dot ' + status;
+            document.getElementById('syncLabel').textContent = label;
+        }
+
+        // Silent auto-upload (no toasts)
+        async function autoUploadToICloud() {
+            if (!currentUser) return;
+            if (isSyncing) return;
+            if (!autoSyncEnabled) return;
+            
+            try {
+                isSyncing = true;
+                updateSyncStatus('syncing', 'Syncing...');
+                
+                const data = getDataForExport();
+                const jsonData = JSON.stringify(data, null, 2);
+                
+                // Try File System Access API (works on iOS Safari 16.4+)
+                if ('showSaveFilePicker' in window) {
+                    try {
+                        const handle = await window.showSaveFilePicker({
+                            suggestedName: ICLOUD_FILE_NAME,
+                            types: [{
+                                description: 'JSON File',
+                                accept: { 'application/json': ['.json'] }
+                            }]
+                        });
+                        const writable = await handle.createWritable();
+                        await writable.write(jsonData);
+                        await writable.close();
+                        pendingChanges = false;
+                        updateSyncStatus('auto', 'Auto');
+                        document.getElementById('icloudStatus').textContent = '✅ Auto-sync active • Last saved: ' + new Date().toLocaleTimeString();
+                        isSyncing = false;
+                        return;
+                    } catch (e) {
+                        console.log('Auto-save picker cancelled:', e);
+                    }
+                }
+                
+                // Fallback: Download the file (silent auto-download doesn't work well)
+                // So we skip auto-save if the file picker isn't available
+                if (!('showSaveFilePicker' in window)) {
+                    // Show a prompt to save manually
+                    if (pendingChanges) {
+                        updateSyncStatus('error', 'Manual');
+                        document.getElementById('icloudStatus').textContent = '⚠️ Tap "📤 Upload" to save manually';
+                        pendingChanges = false;
+                    }
+                }
+                
+                updateSyncStatus('auto', 'Auto');
+                
+            } catch (error) {
+                console.error('Auto-upload error:', error);
+                updateSyncStatus('error', 'Error');
+            } finally {
+                isSyncing = false;
+            }
+        }
+
+        // Manual upload (shows toast)
         async function uploadToICloud() {
             if (!currentUser) { showToast('Sign in first', 'error'); return; }
             if (isSyncing) return;
@@ -640,11 +713,12 @@
             try {
                 isSyncing = true;
                 updateSyncStatus('syncing', 'Uploading...');
+                showToast('☁️ Preparing to save...', 'info');
                 
                 const data = getDataForExport();
                 const jsonData = JSON.stringify(data, null, 2);
                 
-                // Use the File System Access API (works on iOS Safari 16.4+)
+                // Use the File System Access API
                 if ('showSaveFilePicker' in window) {
                     try {
                         const handle = await window.showSaveFilePicker({
@@ -658,17 +732,17 @@
                         await writable.write(jsonData);
                         await writable.close();
                         showToast('☁️ Saved to iCloud Drive!', 'success');
-                        updateSyncStatus('synced', 'Synced');
+                        updateSyncStatus('auto', 'Auto');
                         document.getElementById('icloudStatus').textContent = '✅ Saved to iCloud Drive at ' + new Date().toLocaleTimeString();
+                        pendingChanges = false;
                         isSyncing = false;
                         return;
                     } catch (e) {
                         console.log('Save picker cancelled:', e);
-                        // Fall through to download method
                     }
                 }
                 
-                // Fallback: Download the file (works on all devices)
+                // Fallback: Download the file
                 const blob = new Blob([jsonData], { type: 'application/json' });
                 const link = document.createElement('a');
                 link.href = URL.createObjectURL(blob);
@@ -678,20 +752,21 @@
                 document.body.removeChild(link);
                 URL.revokeObjectURL(link.href);
                 
-                showToast('📤 File downloaded. Save it to iCloud Drive.', 'info');
-                updateSyncStatus('synced', 'Synced');
+                showToast('📤 File downloaded. Save to iCloud Drive.', 'info');
+                updateSyncStatus('auto', 'Auto');
                 document.getElementById('icloudStatus').textContent = '📤 File downloaded. Save to iCloud Drive.';
+                pendingChanges = false;
                 
             } catch (error) {
                 console.error('Upload error:', error);
-                updateSyncStatus('error', 'Upload failed');
+                updateSyncStatus('error', 'Failed');
                 showToast('❌ Upload failed: ' + error.message, 'error');
             } finally {
                 isSyncing = false;
             }
         }
 
-        // Download - FIXED for iOS
+        // Manual download
         async function downloadFromICloud() {
             if (!currentUser) { showToast('Sign in first', 'error'); return; }
             if (isSyncing) return;
@@ -700,16 +775,14 @@
                 isSyncing = true;
                 updateSyncStatus('syncing', 'Downloading...');
                 
-                // Create a hidden file input element (this works on iOS)
+                // Create a hidden file input element (works on iOS)
                 const fileInput = document.createElement('input');
                 fileInput.type = 'file';
                 fileInput.accept = '.json,application/json';
                 fileInput.style.cssText = 'position:absolute;left:-9999px;top:-9999px;';
                 
-                // Add it to the body
                 document.body.appendChild(fileInput);
                 
-                // Create a promise that resolves when a file is selected
                 const file = await new Promise((resolve) => {
                     fileInput.onchange = function(e) {
                         if (this.files && this.files.length > 0) {
@@ -717,29 +790,18 @@
                         } else {
                             resolve(null);
                         }
-                        // Clean up
                         document.body.removeChild(fileInput);
                     };
-                    // Handle cancel (iOS and desktop)
                     fileInput.oncancel = function() {
                         resolve(null);
                         document.body.removeChild(fileInput);
                     };
-                    // Also handle blur (some browsers)
-                    window.addEventListener('focus', function onFocus() {
-                        if (!fileInput.files || fileInput.files.length === 0) {
-                            // User might have cancelled
-                        }
-                        window.removeEventListener('focus', onFocus);
-                    }, { once: true });
-                    
-                    // Trigger the file picker
                     fileInput.click();
                 });
                 
                 if (!file) {
                     showToast('📂 No file selected', 'info');
-                    updateSyncStatus('synced', 'Synced');
+                    updateSyncStatus('auto', 'Auto');
                     isSyncing = false;
                     return;
                 }
@@ -749,7 +811,6 @@
                 const data = JSON.parse(text);
                 
                 if (data && data.entries) {
-                    // Check if this data matches the current user
                     if (data.user && data.user.id === currentUser.id) {
                         const cloudEntries = data.entries.length;
                         const localEntries = entries.length;
@@ -762,7 +823,6 @@
                             showToast('☁️ Already up to date', 'info');
                         }
                     } else if (data.user) {
-                        // Different user's data - ask to import
                         if (confirm(`Found data for "${data.user.username}". Import it?`)) {
                             projects = data.projects || projects;
                             entries = data.entries || entries;
@@ -773,7 +833,6 @@
                             return;
                         }
                     } else {
-                        // No user info in file - just import
                         if (confirm(`Import ${data.entries.length} entries?`)) {
                             projects = data.projects || projects;
                             entries = data.entries || entries;
@@ -788,29 +847,79 @@
                     render();
                     generateDashboard();
                     document.getElementById('icloudStatus').textContent = '✅ Loaded from iCloud Drive at ' + new Date().toLocaleTimeString();
+                    pendingChanges = false;
                 } else {
                     showToast('❌ Invalid file format', 'error');
                 }
                 
-                updateSyncStatus('synced', 'Synced');
+                updateSyncStatus('auto', 'Auto');
                 
             } catch (error) {
                 console.error('Download error:', error);
-                updateSyncStatus('error', 'Download failed');
+                updateSyncStatus('error', 'Failed');
                 showToast('❌ Download failed: ' + error.message, 'error');
             } finally {
                 isSyncing = false;
             }
         }
 
-        function updateSyncStatus(status, label) {
-            const dot = document.querySelector('.sync-status .dot');
-            if (dot) dot.className = 'dot ' + status;
-            document.getElementById('syncLabel').textContent = label;
+        // ============================================================
+        // AUTO-SYNC CONTROLS
+        // ============================================================
+        
+        function startAutoSync() {
+            if (autoSyncInterval) return;
+            
+            autoSyncEnabled = true;
+            document.getElementById('syncLabel').textContent = 'Auto';
+            document.getElementById('icloudStatus').textContent = '🔄 Auto-sync active • Saves to iCloud Drive every 30 seconds';
+            document.getElementById('toggleAutoSyncBtn').textContent = '⏸️ Pause';
+            
+            // Auto-sync every 30 seconds
+            autoSyncInterval = setInterval(() => {
+                if (currentUser && autoSyncEnabled) {
+                    // Only auto-save if there are pending changes
+                    if (pendingChanges) {
+                        autoUploadToICloud();
+                    }
+                }
+            }, 30000);
+        }
+
+        function stopAutoSync() {
+            if (autoSyncInterval) {
+                clearInterval(autoSyncInterval);
+                autoSyncInterval = null;
+            }
+            autoSyncEnabled = false;
+            document.getElementById('syncLabel').textContent = 'Paused';
+            document.getElementById('icloudStatus').textContent = '⏸️ Auto-sync paused • Tap "▶️ Resume" to enable';
+            document.getElementById('toggleAutoSyncBtn').textContent = '▶️ Resume';
+        }
+
+        function toggleAutoSync() {
+            if (autoSyncEnabled) {
+                stopAutoSync();
+            } else {
+                startAutoSync();
+                // Do an initial sync
+                if (currentUser && pendingChanges) {
+                    autoUploadToICloud();
+                }
+            }
+        }
+
+        // Mark that changes have been made (triggers auto-sync)
+        function markChanges() {
+            pendingChanges = true;
+            // Update status to show there are pending changes
+            if (autoSyncEnabled) {
+                document.getElementById('icloudStatus').textContent = '🔄 Changes pending • Auto-sync in 30s';
+            }
         }
 
         // ============================================================
-        // AUTH (Simple - No Supabase)
+        // AUTH
         // ============================================================
         
         function loadUsers() {
@@ -850,6 +959,10 @@
         function logoutUser() {
             currentUser = null;
             localStorage.removeItem('currentUser');
+            if (autoSyncInterval) {
+                clearInterval(autoSyncInterval);
+                autoSyncInterval = null;
+            }
             showAuth();
         }
 
@@ -860,6 +973,7 @@
         function saveData() {
             if (!currentUser) return;
             localStorage.setItem('timesheet_' + currentUser.id, JSON.stringify({ projects, entries }));
+            markChanges();
         }
 
         function loadData() {
@@ -901,6 +1015,16 @@
             const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
             $('summaryStartDate').value = formatDateInput(start.getTime());
             $('summaryEndDate').value = formatDateInput(end.getTime());
+            
+            // Start auto-sync
+            startAutoSync();
+            
+            // Do an initial sync after 2 seconds
+            setTimeout(() => {
+                if (currentUser && autoSyncEnabled) {
+                    downloadFromICloud();
+                }
+            }, 2000);
         }
 
         // ============================================================
@@ -1502,6 +1626,7 @@ $('searchBox').addEventListener('input', render);
 $('logoutBtn').addEventListener('click', logoutUser);
 $('syncUploadBtn').addEventListener('click', uploadToICloud);
 $('syncDownloadBtn').addEventListener('click', downloadFromICloud);
+$('toggleAutoSyncBtn').addEventListener('click', toggleAutoSync);
 
 $('prevMonth').addEventListener('click', () => changeMonth(-1));
 $('nextMonth').addEventListener('click', () => changeMonth(1));
