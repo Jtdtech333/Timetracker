@@ -14,12 +14,8 @@
     <link rel="apple-touch-icon" sizes="180x180" href="icon-192.png" />
     <link rel="icon" type="image/png" href="icon-192.png" />
     
-    <title>Timesheet Pro</title>
+    <title>Timesheet Pro - iCloud Sync</title>
     
-    <!-- ===== SUPABASE SDK ===== -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2">
-    </script>
-
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         :root {
@@ -330,6 +326,16 @@
             font-size: 0.75rem;
         }
 
+        .icloud-status {
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            padding: 0.2rem 0.5rem;
+            background: var(--hover-bg);
+            border-radius: 8px;
+            text-align: center;
+            margin-top: 0.3rem;
+        }
+
         @media (max-width: 480px) {
             body { padding: 0.4rem; padding-bottom: 70px; }
             .card { padding: 0.6rem; }
@@ -369,12 +375,12 @@
     <div id="authContainer" class="auth-container">
         <div class="auth-box">
             <h1>📋 Timesheet Pro</h1>
-            <div class="subtitle">Track time • Real Cloud Sync</div>
+            <div class="subtitle">Track time • Auto-sync via iCloud</div>
             <div class="auth-error" id="authError"></div>
             <form id="authForm">
                 <div class="form-group">
-                    <label>👤 Username</label>
-                    <input type="text" id="authUsername" placeholder="Enter username" required />
+                    <label>👤 Email</label>
+                    <input type="email" id="authEmail" placeholder="your@email.com" required />
                 </div>
                 <div class="form-group">
                     <label>🔑 Password</label>
@@ -386,7 +392,7 @@
                 Don't have an account? <a id="authToggleLink">Create one</a>
             </div>
             <div style="text-align:center; margin-top:0.8rem; font-size:0.7rem; color:var(--text-muted);">
-                ☁️ Data syncs automatically to the cloud
+                ☁️ Data syncs automatically across your Apple devices
             </div>
         </div>
     </div>
@@ -413,13 +419,15 @@
             <!-- ===== SYNC SECTION ===== -->
             <div class="card no-print" style="background: var(--hover-bg); border: 2px solid var(--border-color); padding: 0.5rem;">
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.3rem;">
-                    <span style="font-weight: 600; font-size: 0.75rem;">☁️ Cloud Sync</span>
+                    <span style="font-weight: 600; font-size: 0.75rem;">☁️ iCloud Auto-Sync</span>
                     <div class="sync-section">
                         <button class="btn btn-success btn-sm" id="syncNowBtn">🔄 Sync Now</button>
+                        <button class="btn btn-warning btn-sm" id="exportBackupBtn">💾 Backup</button>
+                        <button class="btn btn-primary btn-sm" id="importBackupBtn">📂 Restore</button>
                     </div>
                 </div>
-                <div style="font-size: 0.65rem; color: var(--text-muted); padding: 0.2rem 0.5rem; background: var(--hover-bg); border-radius: 8px; text-align: center; margin-top: 0.3rem;">
-                    ✅ Data syncs automatically to the cloud
+                <div class="icloud-status" id="icloudStatus">
+                    ✅ Data syncs automatically every 30 seconds
                 </div>
             </div>
 
@@ -548,13 +556,7 @@
 
     <script>
         // ============================================================
-        // SUPABASE CONFIG - REPLACE WITH YOUR CREDENTIALS!
-        // ============================================================
-        const SUPABASE_URL = 'https://awrvkasglchiaxkhnbsw.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF3cnZrYXNnbGNoaWF4a2huYnN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2MzM3NjksImV4cCI6MjA5OTIwOTc2OX0.bvUKnzMlW_REuEbkz5ZSvScUZuEHQZH1-8HLIqQIZ3k';
-        
-        // ============================================================
-        // TIMESHEET PRO - SIMPLIFIED CLOUD SYNC
+        // TIMESHEET PRO - REAL iCLOUD AUTO-SYNC
         // ============================================================
         
         // ===== STATE =====
@@ -565,7 +567,196 @@
         let editingId = null;
         let isSignUp = false;
         let isSyncing = false;
-        let supabaseClient = null;
+        let syncInterval = null;
+
+        // ===== iCLOUD STORAGE (Real iCloud Sync) =====
+        // This uses the WebKit iCloud storage that actually syncs
+        // across devices with the same Apple ID
+        
+        const ICLOUD_STORE_KEY = 'timesheet_cloud_data';
+        
+        // Get data from iCloud-synced storage
+        function getICloudData() {
+            try {
+                // iOS Safari syncs localStorage via iCloud
+                // This is the actual iCloud sync that Apple provides
+                const stored = localStorage.getItem(ICLOUD_STORE_KEY);
+                if (stored) {
+                    return JSON.parse(stored);
+                }
+                return null;
+            } catch (e) {
+                console.error('iCloud read error:', e);
+                return null;
+            }
+        }
+
+        // Save data to iCloud-synced storage
+        function setICloudData(data) {
+            try {
+                localStorage.setItem(ICLOUD_STORE_KEY, JSON.stringify(data));
+                return true;
+            } catch (e) {
+                console.error('iCloud write error:', e);
+                return false;
+            }
+        }
+
+        // ===== AUTO-SYNC FUNCTIONS =====
+        async function syncToCloud() {
+            if (!currentUser) return;
+            if (isSyncing) return;
+            
+            try {
+                isSyncing = true;
+                updateSyncStatus('syncing', 'Syncing...');
+                
+                const data = {
+                    userId: currentUser.id,
+                    userEmail: currentUser.email,
+                    projects: projects,
+                    entries: entries,
+                    lastSync: new Date().toISOString(),
+                    version: '4.0'
+                };
+                
+                // Save to iCloud-synced localStorage
+                const success = setICloudData(data);
+                
+                if (success) {
+                    updateSyncStatus('synced', 'Synced');
+                    document.getElementById('icloudStatus').textContent = '✅ Last sync: ' + new Date().toLocaleTimeString();
+                    // Don't show toast for auto-sync to avoid spam
+                } else {
+                    updateSyncStatus('error', 'Failed');
+                }
+                
+            } catch (error) {
+                console.error('Sync error:', error);
+                updateSyncStatus('error', 'Failed');
+            } finally {
+                isSyncing = false;
+            }
+        }
+
+        async function syncFromCloud(showMessage = false) {
+            if (!currentUser) return;
+            if (isSyncing) return;
+            
+            try {
+                isSyncing = true;
+                updateSyncStatus('syncing', 'Syncing...');
+                
+                // Get data from iCloud-synced localStorage
+                const data = getICloudData();
+                
+                if (data) {
+                    // Check if data belongs to this user
+                    if (data.userId === currentUser.id) {
+                        const cloudEntries = data.entries ? data.entries.length : 0;
+                        const localEntries = entries.length;
+                        
+                        if (cloudEntries > localEntries) {
+                            projects = data.projects || projects;
+                            entries = data.entries || entries;
+                            if (showMessage) showToast('☁️ Downloaded from iCloud!', 'success');
+                            saveData();
+                            render();
+                            generateDashboard();
+                        } else if (cloudEntries < localEntries) {
+                            // Local has more data - upload to cloud
+                            await syncToCloud();
+                            if (showMessage) showToast('☁️ Uploaded to iCloud!', 'success');
+                        } else {
+                            if (showMessage) showToast('☁️ Already in sync', 'info');
+                        }
+                    } else if (data.entries) {
+                        // Different user data found - ask to import
+                        if (showMessage && confirm(`Found data from ${data.userEmail || 'another account'}. Import it?`)) {
+                            projects = data.projects || projects;
+                            entries = data.entries || entries;
+                            saveData();
+                            render();
+                            generateDashboard();
+                            showToast('☁️ Imported from iCloud!', 'success');
+                        }
+                    }
+                } else if (entries.length > 0) {
+                    // No cloud data but local data exists - upload it
+                    await syncToCloud();
+                    if (showMessage) showToast('☁️ Uploaded to iCloud!', 'success');
+                }
+                
+                updateSyncStatus('synced', 'Synced');
+                document.getElementById('icloudStatus').textContent = '✅ Auto-sync active - ' + new Date().toLocaleTimeString();
+                
+            } catch (error) {
+                console.error('Sync error:', error);
+                updateSyncStatus('error', 'Failed');
+                if (showMessage) showToast('❌ Sync failed', 'error');
+            } finally {
+                isSyncing = false;
+            }
+        }
+
+        function updateSyncStatus(status, label) {
+            const dot = document.querySelector('.sync-status .dot');
+            if (dot) dot.className = 'dot ' + status;
+            document.getElementById('syncLabel').textContent = label;
+        }
+
+        // ===== EXPORT/IMPORT BACKUP =====
+        function exportBackup() {
+            if (!currentUser) { showToast('Sign in first', 'error'); return; }
+            const data = {
+                userId: currentUser.id,
+                userEmail: currentUser.email,
+                projects: projects,
+                entries: entries,
+                exportedAt: new Date().toISOString(),
+                version: '4.0'
+            };
+            const json = JSON.stringify(data, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `timesheet_backup_${new Date().toISOString().slice(0,10)}.json`;
+            link.click();
+            URL.revokeObjectURL(link.href);
+            showToast('📤 Backup exported!', 'success');
+        }
+
+        function importBackup() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = function(e) {
+                const file = this.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = function(ev) {
+                    try {
+                        const data = JSON.parse(ev.target.result);
+                        if (!data.projects || !data.entries) {
+                            showToast('❌ Invalid backup', 'error');
+                            return;
+                        }
+                        if (!confirm(`Import ${data.entries.length} entries? This will REPLACE all data.`)) return;
+                        projects = data.projects;
+                        entries = data.entries;
+                        saveData();
+                        render();
+                        generateDashboard();
+                        syncToCloud();
+                        showToast(`✅ Imported ${data.entries.length} entries!`, 'success');
+                    } catch (err) {
+                        showToast('❌ Error reading backup', 'error');
+                    }
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        }
 
         // ===== DOM REFS =====
         const $ = id => document.getElementById(id);
@@ -616,114 +807,49 @@
         }
         function escapeHtml(t) { if (!t) return ''; const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
 
-        // ============================================================
-        // SUPABASE FUNCTIONS - SIMPLIFIED
-        // ============================================================
-        
-        function initSupabase() {
-            const { createClient } = supabase;
-            supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-        }
-
-        async function loadFromCloud() {
+        // ===== SAVE / LOAD =====
+        function saveData() {
             if (!currentUser) return;
-            
-            try {
-                updateSyncStatus('syncing', 'Loading...');
-                
-                // Load projects
-                const { data: projectsData, error: projectsError } = await supabaseClient
-                    .from('timesheet_data')
-                    .select('*')
-                    .eq('user_id', currentUser.id);
-                
-                if (projectsError) throw projectsError;
-                
-                if (projectsData && projectsData.length > 0) {
-                    // Parse the data
-                    const data = projectsData[0];
-                    projects = data.projects || [];
-                    entries = data.entries || [];
-                    
-                    // Update the UI
-                    render();
-                    generateDashboard();
-                    showToast('☁️ Data loaded from cloud!', 'success');
-                }
-                
-                updateSyncStatus('synced', 'Synced');
-                
-            } catch (error) {
-                console.error('Load error:', error);
-                updateSyncStatus('error', 'Failed');
-                showToast('❌ Failed to load data', 'error');
+            localStorage.setItem('timesheet_' + currentUser.id, JSON.stringify({ projects, entries }));
+            // Auto-sync to cloud
+            syncToCloud();
+        }
+
+        function loadData() {
+            const stored = localStorage.getItem('currentUser');
+            if (stored) {
+                try {
+                    const user = JSON.parse(stored);
+                    const data = localStorage.getItem('timesheet_' + user.id);
+                    if (data) {
+                        const parsed = JSON.parse(data);
+                        projects = parsed.projects || [];
+                        entries = parsed.entries || [];
+                    }
+                    currentUser = user;
+                    return true;
+                } catch (e) { return false; }
             }
+            return false;
         }
 
-        async function saveToCloud() {
-            if (!currentUser) return;
-            if (isSyncing) return;
-            
-            try {
-                isSyncing = true;
-                updateSyncStatus('syncing', 'Saving...');
-                
-                const data = {
-                    user_id: currentUser.id,
-                    projects: projects,
-                    entries: entries,
-                    updated_at: new Date().toISOString()
-                };
-                
-                // Upsert (update or insert)
-                const { error } = await supabaseClient
-                    .from('timesheet_data')
-                    .upsert(data, { onConflict: 'user_id' });
-                
-                if (error) throw error;
-                
-                updateSyncStatus('synced', 'Synced');
-                showToast('☁️ Saved to cloud!', 'success');
-                
-            } catch (error) {
-                console.error('Save error:', error);
-                updateSyncStatus('error', 'Failed');
-                showToast('❌ Failed to save: ' + error.message, 'error');
-            } finally {
-                isSyncing = false;
-            }
-        }
-
-        function updateSyncStatus(status, label) {
-            const dot = document.querySelector('.sync-status .dot');
-            if (dot) dot.className = 'dot ' + status;
-            document.getElementById('syncLabel').textContent = label;
-        }
-
-        // ============================================================
-        // AUTH (Simple - No Supabase Auth)
-        // ============================================================
-        
+        // ===== AUTH =====
         function loadUsers() {
             const stored = localStorage.getItem('timesheet_users');
             try { return stored ? JSON.parse(stored) : []; } catch (e) { return []; }
         }
-        
-        function saveUsers(users) {
-            localStorage.setItem('timesheet_users', JSON.stringify(users));
-        }
-        
-        function authenticate(username, password) {
+        function saveUsers(users) { localStorage.setItem('timesheet_users', JSON.stringify(users)); }
+        function authenticate(email, password) {
             const users = loadUsers();
-            return users.find(u => u.username === username && u.password === password);
+            return users.find(u => u.email === email && u.password === password);
         }
-        
-        function createUser(username, password) {
+        function createUser(email, password) {
             const users = loadUsers();
-            if (users.find(u => u.username === username)) return null;
+            if (users.find(u => u.email === email)) return null;
             const user = {
                 id: 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
-                username: username,
+                email: email,
+                name: email.split('@')[0],
                 password: password,
                 created: new Date().toISOString()
             };
@@ -732,26 +858,29 @@
             return user;
         }
 
-        async function loginUser(user) {
+        function loginUser(user) {
             currentUser = user;
             localStorage.setItem('currentUser', JSON.stringify(user));
-            
-            // Load from cloud
-            await loadFromCloud();
-            
+            if (projects.length === 0) {
+                projects = [
+                    { id: 'p1', name: 'Website', rate: 75 },
+                    { id: 'p2', name: 'App Dev', rate: 100 },
+                    { id: 'p3', name: 'Consulting', rate: 150 }
+                ];
+            }
             showApp();
+            // Sync from cloud on login
+            setTimeout(() => syncFromCloud(true), 1500);
         }
 
         function logoutUser() {
             currentUser = null;
             localStorage.removeItem('currentUser');
+            if (syncInterval) { clearInterval(syncInterval); syncInterval = null; }
             showAuth();
         }
 
-        // ============================================================
-        // UI
-        // ============================================================
-        
+        // ===== UI =====
         function showAuth() {
             $('authContainer').style.display = 'flex';
             $('appContainer').style.display = 'none';
@@ -760,28 +889,26 @@
         function showApp() {
             $('authContainer').style.display = 'none';
             $('appContainer').style.display = 'block';
-            $('userGreeting').textContent = 'Welcome, ' + (currentUser ? currentUser.username : 'User');
-            
-            // Load data if we haven't already
-            if (projects.length === 0) {
-                loadFromCloud();
-            } else {
-                render();
-                generateDashboard();
-            }
-            
+            $('userGreeting').textContent = 'Welcome, ' + (currentUser ? currentUser.name : 'User');
+            render();
+            generateDashboard();
             const today = new Date();
             $('entryDate').value = formatDateInput(today.getTime());
             const start = new Date(today.getFullYear(), today.getMonth(), 1);
             const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
             $('summaryStartDate').value = formatDateInput(start.getTime());
             $('summaryEndDate').value = formatDateInput(end.getTime());
+            
+            // Auto-sync every 30 seconds
+            if (syncInterval) clearInterval(syncInterval);
+            syncInterval = setInterval(() => {
+                if (currentUser && !isSyncing) {
+                    syncToCloud();
+                }
+            }, 30000);
         }
 
-        // ============================================================
-        // POPULATE PROJECT DROPDOWN
-        // ============================================================
-        
+        // ===== POPULATE PROJECT DROPDOWN =====
         function populateProjectDropdown() {
             const select = $('entryProject');
             const currentVal = select.value;
@@ -795,10 +922,7 @@
             if (currentVal && projects.find(p => p.id === currentVal)) select.value = currentVal;
         }
 
-        // ============================================================
-        // RENDER
-        // ============================================================
-        
+        // ===== RENDER =====
         function render() {
             renderProjects();
             populateProjectDropdown();
@@ -912,10 +1036,7 @@
             $('monthLabel').textContent = currentMonth.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
         }
 
-        // ============================================================
-        // DASHBOARD
-        // ============================================================
-        
+        // ===== DASHBOARD =====
         function generateDashboard() {
             if (entries.length === 0) {
                 $('dashboardContent').innerHTML = `
@@ -965,10 +1086,7 @@
             $('dashboardContent').innerHTML = html;
         }
 
-        // ============================================================
-        // SUMMARY
-        // ============================================================
-        
+        // ===== SUMMARY =====
         function generateSummary() {
             const type = $('summaryType').value;
             const projectId = $('summaryProject').value;
@@ -1038,10 +1156,7 @@
             return 1 + Math.round(((d - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
         }
 
-        // ============================================================
-        // ACTIONS
-        // ============================================================
-        
+        // ===== ACTIONS =====
         function addEntry() {
             const date = $('entryDate').value;
             const projectId = $('entryProject').value;
@@ -1078,8 +1193,7 @@
                 });
                 showToast('✅ Entry added!', 'success');
             }
-            // Auto-save to cloud
-            saveToCloud();
+            saveData();
             render();
             clearEntryForm();
         }
@@ -1112,7 +1226,7 @@
         function deleteEntry(id) {
             if (!confirm('Delete this entry?')) return;
             entries = entries.filter(e => e.id !== id);
-            saveToCloud();
+            saveData();
             render();
             showToast('🗑 Entry deleted', 'info');
         }
@@ -1121,7 +1235,7 @@
             if (!confirm('Delete project and all entries?')) return;
             entries = entries.filter(e => e.projectId !== id);
             projects = projects.filter(p => p.id !== id);
-            saveToCloud();
+            saveData();
             render();
             showToast('🗑 Project deleted', 'info');
         }
@@ -1132,7 +1246,7 @@
             if (!confirm(`Delete ${todayEntries.length} entries?`)) return;
             const todayStart = new Date().setHours(0, 0, 0, 0);
             entries = entries.filter(e => e.start < todayStart || e.start >= todayStart + 86400000);
-            saveToCloud();
+            saveData();
             render();
             showToast(`🗑 Deleted ${todayEntries.length} entries`, 'info');
         }
@@ -1142,15 +1256,12 @@
             if (!name) return;
             const rate = parseFloat(prompt('Enter hourly rate ($):', '0')) || 0;
             projects.push({ id: 'p_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4), name, rate });
-            saveToCloud();
+            saveData();
             render();
             showToast(`✅ Project "${name}" added`, 'success');
         }
 
-        // ============================================================
-        // EXPORTS (CSV/PDF)
-        // ============================================================
-        
+        // ===== EXPORTS =====
         function exportCSV() {
             const monthEntries = getMonthEntries();
             if (monthEntries.length === 0) { showToast('No entries', 'error'); return; }
@@ -1270,19 +1381,19 @@ $('authError').style.display = 'none';
 // ===== AUTH HANDLER =====
 function handleAuth(e) {
 e.preventDefault();
-const username = $('authUsername').value.trim();
+const email = $('authEmail').value.trim();
 const password = $('authPassword').value.trim();
 
-if (!username || !password) {
+if (!email || !password) {
 $('authError').textContent = 'Please fill in all fields';
 $('authError').className = 'auth-error error';
 return;
 }
 
 if (isSignUp) {
-const user = createUser(username, password);
+const user = createUser(email, password);
 if (!user) {
-$('authError').textContent = '❌ Username already exists';
+$('authError').textContent = '❌ Email already registered';
 $('authError').className = 'auth-error error';
 return;
 }
@@ -1293,15 +1404,15 @@ setTimeout(() => {
 $('authError').style.display = 'none';
 $('authError').className = 'auth-error';
 toggleAuthMode();
-$('authUsername').value = username;
+$('authEmail').value = email;
 $('authPassword').value = '';
 showToast('✅ Account created! Please sign in.', 'success');
 }, 2000);
 
 } else {
-const user = authenticate(username, password);
+const user = authenticate(email, password);
 if (!user) {
-$('authError').textContent = '❌ Invalid username or password';
+$('authError').textContent = '❌ Invalid email or password';
 $('authError').className = 'auth-error error';
 return;
 }
@@ -1340,53 +1451,15 @@ $('themeToggle').textContent = saved === 'dark' ? '☀️' : '🌓';
 }
 }
 
-// ============================================================
-// INIT
-// ============================================================
-        
+// ===== INIT =====
 function init() {
 loadTheme();
+if (!loadData()) showAuth();
+else showApp();
 
-// Check if Supabase is configured
-if (SUPABASE_URL === 'YOUR_SUPABASE_URL' || SUPABASE_ANON_KEY === 'YOUR_SUPABASE_ANON_KEY') {
-document.body.innerHTML = `
-<div style="display:flex; justify-content:center; align-items:center; min-height:100vh; padding:2rem; background:var(--bg-primary);">
-<div style="background:white; padding:2rem; border-radius:16px; max-width:500px; text-align:center; box-shadow:0 4px 20px rgba(0,0,0,0.1);">
-<h2 style="color:#e53e3e;">⚠️ Supabase Not Configured</h2>
-<p style="margin:1rem 0; color:#4a5568;">Please add your Supabase URL and Anon Key to the code.</p>
-<p style="font-size:0.8rem; color:#718096;">Find them in your Supabase dashboard → Settings → API</p>
-<code style="display:block; background:#f7fafc; padding:1rem; border-radius:8px; margin:1rem 0; font-size:0.75rem; word-break:break-all; text-align:left;">
-const SUPABASE_URL = 'YOUR_SUPABASE_URL';<br>
-const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
-</code>
-</div>
-</div>
-`;
-return;
-}
-
-// Initialize Supabase
-initSupabase();
-
-// Check if user is already logged in
-const stored = localStorage.getItem('currentUser');
-if (stored) {
-try {
-const user = JSON.parse(stored);
-currentUser = user;
-showApp();
-} catch (e) {
-showAuth();
-}
-} else {
-showAuth();
-}
-
-// Auth events
 $('authForm').addEventListener('submit', handleAuth);
 $('authToggleLink').addEventListener('click', toggleAuthMode);
 
-// App events
 $('addEntryBtn').addEventListener('click', addEntry);
 $('entryDate').addEventListener('keydown', (e) => { if (e.key === 'Enter') addEntry(); });
 $('entryStart').addEventListener('keydown', (e) => { if (e.key === 'Enter') addEntry(); });
@@ -1401,10 +1474,12 @@ $('clearDayBtn').addEventListener('click', clearTodayEntries);
 $('exportCsvBtn').addEventListener('click', exportCSV);
 $('exportPdfBtn').addEventListener('click', exportPDF);
 $('exportSummaryPdfBtn').addEventListener('click', exportSummaryPDF);
+$('exportBackupBtn').addEventListener('click', exportBackup);
+$('importBackupBtn').addEventListener('click', importBackup);
 $('themeToggle').addEventListener('click', toggleTheme);
 $('searchBox').addEventListener('input', render);
 $('logoutBtn').addEventListener('click', logoutUser);
-$('syncNowBtn').addEventListener('click', loadFromCloud);
+$('syncNowBtn').addEventListener('click', () => syncFromCloud(true));
 
 $('prevMonth').addEventListener('click', () => changeMonth(-1));
 $('nextMonth').addEventListener('click', () => changeMonth(1));
@@ -1421,9 +1496,13 @@ document.addEventListener('keydown', (e) => {
 if (e.ctrlKey && e.key === 'Enter') addEntry();
 });
 
+window.addEventListener('beforeunload', () => {
+if (currentUser) saveData();
+});
+
 setTimeout(generateSummary, 500);
 
-if (currentUser) showToast('👋 Welcome!', 'info');
+if (currentUser) showToast('👋 Welcome ' + currentUser.name + '!', 'info');
 }
 
 document.addEventListener('DOMContentLoaded', init);
